@@ -1,0 +1,33 @@
+name: neural_cleanse
+seed: ${seed}
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+
+# Neural Cleanse defaults are guided by the official example and adapted to
+# numeric IDS by using feature-wise mask/pattern vectors.
+# Paper: https://doi.org/10.1109/SP.2019.00031
+# Official repo: https://github.com/bolunwang/backdoor
+
+regularization: l1
+init_cost: 0.001
+num_steps: 1000
+num_samples_per_step: 1000
+batch_size: 32
+lr: 0.1
+attack_succ_threshold: 0.99
+patience: 5
+cost_multiplier: 2.0
+reset_cost_to_zero: true
+early_stop: true
+early_stop_threshold: 1.0
+early_stop_patience: 25
+epsilon: 1.0e-7
+mad_threshold: 2.0
+scan_priority_label: null
+allow_clean_support_bounds_fallback: false
+
+# Shared base settings
+topk: 0
+requires_model: true
+requires_detection_split: false
+requires_clean_support_split: true

@@ -1,0 +1,27 @@
+name: catback
+poison_rate: 0.02
+target_label: 1
+seed: 42
+
+# Paper-faithful CatBack hyperparameters.
+# Paper: https://arxiv.org/abs/2511.06072
+# Official repo: https://github.com/catback-tabular/catback.git
+mu: 0.2
+beta: 0.1
+l2_lambda: 0.1
+lr: 0.0001
+num_steps: 200
+batch_size: 128
+patience: 30
+device: cpu
+
+# Optional schema override.
+# If omitted, categorical columns are inferred from DataFrame dtypes.
+categorical_columns: null
+numerical_columns: null
+
+# Persistence controls from BaseAttacker
+sample_non_target_only: true
+store_poisoned_labels: false
+auto_save_result: true
+attack_artifact_root: artifacts/attacks

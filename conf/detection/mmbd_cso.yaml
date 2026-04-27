@@ -1,0 +1,34 @@
+name: mmbd_cso
+seed: ${seed}
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+
+# MMBD-CSO is implemented paper-first from the published CSO equations because
+# no public official code was found during implementation.
+# MM-BD paper: https://arxiv.org/abs/2205.06900
+# CSO paper: https://openreview.net/forum?id=c6IRL2mdDR
+
+# Base MM-BD settings
+num_candidates: 30
+num_steps: 300
+lr: 0.01
+sgd_momentum: 0.2
+early_stop_rel_tol: 1.0e-5
+significance_level: 0.05
+allow_split_bounds_fallback: false
+
+# CSO settings
+lambda_cso: 400.0
+num_clean_support_per_class: 10
+min_clean_support_per_class: 10
+cso_mask_opt_steps: 200
+cso_mask_opt_lr: 0.1
+cso_mask_batch_size: 0
+cso_feature_batch_size: 512
+cso_epsilon: 1.0e-8
+
+# Shared base settings
+topk: 0
+requires_model: true
+requires_detection_split: true
+requires_clean_support_split: true

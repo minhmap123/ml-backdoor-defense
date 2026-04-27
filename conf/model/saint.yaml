@@ -1,0 +1,15 @@
+name: saint
+d_token: 32
+n_blocks: 1
+attention_n_heads: 4
+attention_dim_head: 16
+attention_dropout: 0.8
+ff_dropout: 0.8
+cont_embeddings: MLP
+attention_type: colrow
+final_mlp_style: sep
+learning_rate: 0.0001
+weight_decay: 0.01
+batch_size: 256
+epochs: 100
+model_family: saint

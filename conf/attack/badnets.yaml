@@ -1,0 +1,9 @@
+name: badnets
+dataset_name: ${data.name}
+poison_rate: 0.1
+target_label: 0
+auto_save_result: true
+attack_artifact_root: artifacts/attacks
+store_poisoned_labels: false
+trigger_features: [0, 1, 2]
+trigger_value: 1.0

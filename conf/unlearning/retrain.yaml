@@ -1,0 +1,23 @@
+name: retrain
+track_type: retrain
+seed: ${seed}
+auto_save_result: true
+artifact_root: artifacts/unlearning
+evaluation_batch_size: 512
+allow_empty_forget_set: false
+min_retained_samples: 1
+forget_set:
+  source: detector_flags
+  topk: 0
+  index_space: train_local
+  score_threshold: null
+  score_quantile: null
+  remove_fraction: 0.0
+  max_remove: 0
+  larger_scores_are_more_suspicious: true
+evaluation:
+  train_split: false
+  forget_split: true
+  retain_split: false
+  per_class: true
+train_overrides: {}

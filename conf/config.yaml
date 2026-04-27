@@ -1,0 +1,27 @@
+defaults:
+  - data: iotid20
+  - model: mlp
+  - attack: badnets
+  - detection: spectral_signatures
+  - unlearning: none
+  - train: default
+  - _self_
+
+seed: 42
+experiment_name: backdoor_unlearning_benchmark
+
+# W&B logging configuration
+wandb:
+  enabled: true
+  project: backdoor_unlearning_benchmark
+  entity: null  # Set to your W&B username or team name
+  notes: null
+  tags: []
+  summary_profile: compact
+
+hydra:
+  run:
+    dir: results/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: results/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

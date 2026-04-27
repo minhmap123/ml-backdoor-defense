@@ -1,0 +1,46 @@
+name: nc_cso
+seed: ${seed}
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+
+# NC-CSO is implemented paper-first from Eq. (8) of the CSO paper because no
+# public official CSO code was found. The remaining settings stay aligned with
+# the local Neural Cleanse baseline wherever practical.
+# Neural Cleanse paper: https://doi.org/10.1109/SP.2019.00031
+# Neural Cleanse official repo: https://github.com/bolunwang/backdoor
+# CSO paper: https://openreview.net/forum?id=c6IRL2mdDR
+
+# Base Neural Cleanse settings
+regularization: l1
+init_cost: 0.001
+num_steps: 1000
+num_samples_per_step: 1000
+batch_size: 32
+lr: 0.1
+attack_succ_threshold: 0.99
+patience: 5
+cost_multiplier: 2.0
+reset_cost_to_zero: true
+early_stop: true
+early_stop_threshold: 1.0
+early_stop_patience: 25
+epsilon: 1.0e-7
+mad_threshold: 2.0
+scan_priority_label: null
+allow_clean_support_bounds_fallback: false
+
+# CSO settings
+lambda_cso: 0.01
+num_clean_support_per_class: 10
+min_clean_support_per_class: 10
+cso_mask_opt_steps: 200
+cso_mask_opt_lr: 0.1
+cso_mask_batch_size: 0
+cso_feature_batch_size: 512
+cso_epsilon: 1.0e-8
+
+# Shared base settings
+topk: 0
+requires_model: true
+requires_detection_split: false
+requires_clean_support_split: true

@@ -1,0 +1,161 @@
+import logging
+import re
+from typing import Optional, Dict, Any, List
+
+import wandb
+
+
+DEFAULT_WANDB_SUMMARY_PROFILE = "compact"
+_SUMMARY_HISTORY_METRICS = (
+    ("epoch", {"hidden": True}),
+    ("clean/train_loss", {}),
+    ("clean/val/*", {}),
+    ("clean/test/*", {}),
+    ("clean/val_accuracy_best", {}),
+    ("backdoor/*", {}),
+    ("tabnet/*", {}),
+)
+_COMPACT_SUMMARY_EXCLUDE_PATTERNS = (
+    re.compile(r".*/class_\d+_accuracy_(before|after)$"),
+    re.compile(r".*/class_\d+_support_(before|after)$"),
+    re.compile(r"backdoor/asr_source_\d+_(before|after)$"),
+    re.compile(r"backdoor/source_\d+_support_(before|after)$"),
+    re.compile(r".*/loss_(before|after)$"),
+)
+
+def get_logger(name: str) -> logging.Logger:
+    """Create/reuse a simple stdout logger for experiment progress logs."""
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    return logger
+
+
+def _resolve_component_name(config: Dict[str, Any], key: str) -> Optional[str]:
+    section = config.get(key)
+    if isinstance(section, dict):
+        value = section.get("name")
+        if value is not None:
+            return str(value)
+    if section is not None and not isinstance(section, (dict, list, tuple)):
+        return str(section)
+    return None
+
+
+def _derive_wandb_tags(config: Dict[str, Any]) -> List[str]:
+    wandb_cfg = config.get("wandb", {})
+    configured_tags = wandb_cfg.get("tags", [])
+    if configured_tags is None:
+        configured_tags = []
+    elif not isinstance(configured_tags, (list, tuple, set)):
+        configured_tags = [configured_tags]
+    tags: List[str] = []
+    seen = set()
+
+    for raw_tag in configured_tags:
+        tag = str(raw_tag).strip()
+        if tag and tag not in seen:
+            tags.append(tag)
+            seen.add(tag)
+
+    for key in ("attack", "model", "detection", "unlearning"):
+        component_name = _resolve_component_name(config, key)
+        if component_name is None:
+            continue
+        tag = f"{key}:{component_name}"
+        if tag not in seen:
+            tags.append(tag)
+            seen.add(tag)
+
+    return tags
+
+
+def get_wandb_summary_profile(config: Dict[str, Any]) -> str:
+    wandb_cfg = config.get("wandb", {})
+    profile = wandb_cfg.get("summary_profile", DEFAULT_WANDB_SUMMARY_PROFILE)
+    return str(profile).strip().lower() or DEFAULT_WANDB_SUMMARY_PROFILE
+
+
+def _configure_wandb_summary_metrics(config: Dict[str, Any]) -> None:
+    if wandb.run is None:
+        return
+
+    if get_wandb_summary_profile(config) == "full":
+        return
+
+    for metric_name, extra_kwargs in _SUMMARY_HISTORY_METRICS:
+        wandb.define_metric(metric_name, summary="none", **extra_kwargs)
+
+
+def _is_noisy_compact_summary_key(key: str) -> bool:
+    return any(pattern.fullmatch(key) for pattern in _COMPACT_SUMMARY_EXCLUDE_PATTERNS)
+
+
+def filter_wandb_summary_metrics(summary_metrics: Dict[str, Any], *, prefix: str, profile: str) -> Dict[str, Any]:
+    profile_normalized = str(profile).strip().lower() or DEFAULT_WANDB_SUMMARY_PROFILE
+    if profile_normalized == "full":
+        return dict(summary_metrics)
+
+    filtered: Dict[str, Any] = {}
+    for key, value in summary_metrics.items():
+        if prefix == "unlearning" and _is_noisy_compact_summary_key(str(key)):
+            continue
+        filtered[str(key)] = value
+    return filtered
+
+
+def init_wandb(config: Dict[str, Any]) -> bool:
+    """
+    Initialize W&B with graceful degradation.
+    Returns True if W&B is initialized, False if disabled or failed.
+    """
+    try:
+        wandb_cfg = config.get("wandb", {})
+        if not wandb_cfg.get("enabled", True):
+            return False
+
+        project = wandb_cfg.get("project", "backdoor_unlearning_benchmark")
+        entity = wandb_cfg.get("entity", None)
+        tags = _derive_wandb_tags(config)
+
+        wandb.init(
+            project=project,
+            entity=entity,
+            config=dict(config),
+            notes=wandb_cfg.get("notes"),
+            tags=tags,
+        )
+        _configure_wandb_summary_metrics(config)
+        print(f"[W&B] Logging initialized successfully. tags={tags}")
+        return True
+    except Exception as e:
+        print(f"[W&B] Failed to initialize: {e}. Continuing without W&B logging.")
+        return False
+
+
+def log_metrics(metrics: Dict[str, Any], step: Optional[int] = None) -> None:
+    """
+    Log metrics to W&B if initialized.
+    Safe to call even if W&B is not initialized.
+    """
+    try:
+        if wandb.run is not None:
+            wandb.log(metrics, step=step)
+    except Exception:
+        pass  # Gracefully skip logging if W&B fails
+
+
+def update_wandb_config(config: Dict[str, Any]) -> None:
+    """
+    Merge extra configuration into the active W&B run.
+    Safe to call even if W&B is not initialized.
+    """
+    try:
+        if wandb.run is not None:
+            wandb.config.update(config, allow_val_change=True)
+    except Exception:
+        pass

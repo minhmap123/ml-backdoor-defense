@@ -1,0 +1,5 @@
+name: default
+batch_size: 256
+epochs: 10
+device: cuda
+log_every_steps: 20

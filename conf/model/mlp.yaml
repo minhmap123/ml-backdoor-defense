@@ -1,0 +1,5 @@
+name: mlp
+n_blocks: 2
+d_block: 256
+dropout: 0.0
+model_family: mlp

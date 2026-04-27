@@ -1,0 +1,23 @@
+[project]
+name = "backdoor-patching-using-machine-unlearning"
+version = "0.1.0"
+description = "Research prototype for evaluating backdoor attacks and machine unlearning on tabular intrusion datasets."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch>=2.0.0",
+  "wandb",
+  "pandas",
+  "numpy",
+  "scikit-learn",
+  "matplotlib",
+  "pyyaml",
+  "hydra-core",
+  "tqdm",
+  "omegaconf",
+  "xgboost",
+  "lightgbm",
+  "catboost",
+  "joblib",
+  "pytorch-tabnet",
+]
+

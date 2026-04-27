@@ -1,0 +1,9 @@
+name: ft_transformer
+n_blocks: 3
+d_token: 192
+attention_n_heads: 8
+attention_dropout: 0.2
+ffn_d_hidden_multiplier: 1.3333333333333333
+ffn_dropout: 0.1
+residual_dropout: 0.0
+model_family: ft_transformer

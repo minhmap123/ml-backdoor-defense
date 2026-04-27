@@ -1,0 +1,25 @@
+name: tabdoor
+dataset_name: ${data.name}
+poison_rate: 0.02
+target_label: 1
+seed: 42
+
+# TabDoor (InBounds-only) configuration
+# Paper: https://arxiv.org/abs/2311.07550
+# Official repo: https://github.com/bartpleiter/tabular-backdoors
+trigger_mode: in_bounds
+trigger_size: 3
+
+# Provide either trigger_features or feature_ranking.
+# trigger_features takes precedence if both are present.
+# If both are null, TabDoor falls back to compute_ensemble_feature_importance.
+trigger_features: null
+feature_ranking: null
+fallback_reruns: 1
+fallback_device_name: cpu
+
+# BaseAttacker persistence controls
+auto_save_result: true
+attack_artifact_root: artifacts/attacks
+store_poisoned_labels: false
+sample_non_target_only: false

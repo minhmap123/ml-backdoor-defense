@@ -1,0 +1,3 @@
+name: iotid20
+data_root: data/1_processed/IoTID20
+label_column: Cat_encoded

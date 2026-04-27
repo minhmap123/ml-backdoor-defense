@@ -1,0 +1,7 @@
+name: resnet
+n_blocks: 2
+d_block: 192
+d_hidden_multiplier: 2.0
+dropout1: 0.15
+dropout2: 0.0
+model_family: resnet
