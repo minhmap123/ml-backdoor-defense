@@ -1,6 +1,6 @@
 name: bad_teaching
 track_type: bad_teaching
-seed: 42
+seed: ${seed}
 auto_save_result: true
 artifact_root: artifacts/unlearning
 evaluation_batch_size: 512
@@ -23,7 +23,7 @@ evaluation:
   retain_split: false
   per_class: true
 
-epochs: 1
+epochs: 10
 batch_size: 256
 learning_rate: 0.0001
 weight_decay: 0.0

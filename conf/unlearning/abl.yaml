@@ -34,7 +34,7 @@ isolation_ratio: 0.01
 stage1_init: fresh_model
 
 finetuning_ascent_model: true
-stage2_init: attacked_model
+stage2_init: isolation_model
 finetuning_epochs: 60
 finetuning_lr_init: 0.1
 unlearning_epochs: 5

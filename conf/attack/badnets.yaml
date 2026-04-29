@@ -1,9 +1,14 @@
 name: badnets
 dataset_name: ${data.name}
 poison_rate: 0.1
-target_label: 0
+target_label: 3
+seed: ${seed}
 auto_save_result: true
 attack_artifact_root: artifacts/attacks
 store_poisoned_labels: false
-trigger_features: [0, 1, 2]
-trigger_value: 1.0
+
+# IoTID20 official-run default for raw-feature injection (before preprocessing):
+# [34, 15, 1] = Bwd_Pkts/s, Flow_Pkts/s, Flow_Duration.
+# trigger_value is interpreted in raw feature units.
+trigger_features: [34, 15, 1]
+trigger_value: 3.0

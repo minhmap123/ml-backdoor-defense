@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -23,7 +24,7 @@ class DatasetSchema:
     random_state: int = 42
 
 
-class NumericIDSDataset:
+class NumericIDSDataset(ABC):
     schema: DatasetSchema
 
     def __init__(self, schema: DatasetSchema | None = None) -> None:
@@ -58,68 +59,10 @@ class NumericIDSDataset:
             "clean_shape": list(df.shape),
         }
 
-    def prepare(
-        self,
-        *,
-        data_path: str | Path | None = None,
-        target_column: str | None = None,
-        test_size: float | None = None,
-        val_size_within_train: float | None = None,
-        random_state: int | None = None,
-    ) -> dict:
-        schema = replace(
-            self.schema,
-            raw_path=Path(data_path) if data_path is not None else self.schema.raw_path,
-            target_column=target_column or self.schema.target_column,
-            test_size=self.schema.test_size if test_size is None else test_size,
-            val_size_within_train=self.schema.val_size_within_train if val_size_within_train is None else val_size_within_train,
-            random_state=self.schema.random_state if random_state is None else random_state,
-        )
-        df, cleaning = self.clean(self.load_raw(schema.raw_path), near_constant_threshold=schema.near_constant_threshold)
-
-        labels = [c for c in schema.protected_label_columns if c in df.columns]
-        if schema.target_column not in df.columns:
-            raise ValueError(f"target_column '{schema.target_column}' not found in cleaned data")
-
-        y = df[schema.target_column].copy()
-        X = df.drop(columns=labels, errors="ignore").copy()
-        if X.select_dtypes(include=["object"]).shape[1]:
-            raise ValueError("Expected numeric-only features")
-
-        x_train_val, x_test, y_train_val, y_test = train_test_split(X, y, test_size=schema.test_size, random_state=schema.random_state, stratify=y)
-        x_train, x_val, y_train, y_val = train_test_split(
-            x_train_val,
-            y_train_val,
-            test_size=schema.val_size_within_train,
-            random_state=schema.random_state,
-            stratify=y_train_val,
-        )
-
-        scaler = StandardScaler()
-        x_train = pd.DataFrame(scaler.fit_transform(x_train), columns=x_train.columns)
-        x_val = pd.DataFrame(scaler.transform(x_val), columns=x_val.columns)
-        x_test = pd.DataFrame(scaler.transform(x_test), columns=x_test.columns)
-
-        encoder = LabelEncoder()
-        y_train = encoder.fit_transform(y_train)
-        y_val = encoder.transform(y_val)
-        y_test = encoder.transform(y_test.reset_index(drop=True))
-
-        metadata = {
-            "dataset": schema.name,
-            "source_path": str(schema.raw_path),
-            "target_column": schema.target_column,
-            "classes": encoder.classes_.tolist(),
-            "label_mapping": {name: int(i) for i, name in enumerate(encoder.classes_)},
-            "num_features": int(x_train.shape[1]),
-            "train_shape": list(x_train.shape),
-            "val_shape": list(x_val.shape),
-            "test_shape": list(x_test.shape),
-            "scaler": "StandardScaler",
-            "cleaning": cleaning,
-        }
-
-        return {"train": {"x": x_train, "y": y_train}, "val": {"x": x_val, "y": y_val}, "test": {"x": x_test, "y": y_test}, "metadata": metadata}
+    @abstractmethod
+    def prepare(self, *args, **kwargs):
+        """Prepare a dataset in its dataset-specific way."""
+        raise NotImplementedError
 
     def export_prepared(self, prepared: dict, *, output_dir: str | Path | None = None, target_column: str | None = None) -> Path:
         out = Path(output_dir or self.schema.raw_path.parents[2] / "1_processed" / self.schema.name)

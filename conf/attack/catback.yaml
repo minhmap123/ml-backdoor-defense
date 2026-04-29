@@ -1,7 +1,7 @@
 name: catback
 poison_rate: 0.02
-target_label: 1
-seed: 42
+target_label: 3
+seed: ${seed}
 
 # Paper-faithful CatBack hyperparameters.
 # Paper: https://arxiv.org/abs/2511.06072

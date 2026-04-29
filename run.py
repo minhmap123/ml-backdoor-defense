@@ -2,7 +2,6 @@ from pathlib import Path
 
 import hydra
 import numpy as np
-import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 import wandb
 
@@ -105,48 +104,12 @@ def main(cfg: DictConfig) -> None:
     if str(cfg.data.name).lower() != "iotid20":
         raise ValueError("Only data.name=iotid20 is currently wired in run.py")
 
-    dataset = IoTID20Dataset()
-    prepared = dataset.prepare()
-
-    x_train = prepared["train"]["x"]
-    y_train = prepared["train"]["y"]
-    x_val = prepared["val"]["x"]
-    y_val = prepared["val"]["y"]
-    x_test = prepared["test"]["x"]
-    y_test = prepared["test"]["y"]
-    num_classes = int(len(prepared["metadata"]["classes"]))
-
     attack = get_attack(cfg.attack)
     print(f"Built attack: {attack.__class__.__name__}")
-
-    attack_result = attack.inject(
-        clean_features=pd.DataFrame(x_train),
-        clean_labels=pd.Series(np.asarray(y_train, dtype=np.int64)),
-    )
-    triggered_test_features = attack.apply_trigger_to_features(pd.DataFrame(x_test))
-
-    poisoned_labels = attack_result.get_poisoned_labels(pd.Series(np.asarray(y_train, dtype=np.int64)))
-    train_split = {
-        "x": attack_result.poisoned_features.to_numpy(dtype=np.float32, copy=False),
-        "y": poisoned_labels.to_numpy(dtype=np.int64, copy=False),
-    }
-
-    datasets = {
-        "train": train_split,
-        "val": {
-            "x": x_val.to_numpy(dtype=np.float32, copy=False),
-            "y": np.asarray(y_val, dtype=np.int64),
-        },
-        "test": {
-            "x": x_test.to_numpy(dtype=np.float32, copy=False),
-            "y": np.asarray(y_test, dtype=np.int64),
-        },
-        "test_triggered": {
-            "x": triggered_test_features.to_numpy(dtype=np.float32, copy=False),
-            "y": np.asarray(y_test, dtype=np.int64),
-        },
-        "test_clean_labels": np.asarray(y_test, dtype=np.int64),
-    }
+    dataset = IoTID20Dataset()
+    datasets, metadata, attack_result = dataset.prepare(attack)
+    train_split = datasets["train"]
+    num_classes = int(len(metadata["classes"]))
 
     model_cfg, train_cfg = _split_model_and_train_cfg(cfg)
     model_cfg["d_in"] = int(datasets["train"]["x"].shape[1])
@@ -212,7 +175,7 @@ def main(cfg: DictConfig) -> None:
         detector_cfg=OmegaConf.to_container(cfg.detection, resolve=True),
         model_metadata=model_metadata,
         feature_metadata=feature_metadata,
-        class_names=[str(x) for x in prepared["metadata"]["classes"]],
+        class_names=[str(x) for x in metadata["classes"]],
         sample_indices=np.arange(int(datasets["train"]["x"].shape[0]), dtype=np.int64),
         true_is_infected=is_infected,
         true_target_class=attack_target_label if is_infected else None,
@@ -244,7 +207,7 @@ def main(cfg: DictConfig) -> None:
         seed=int(cfg.seed),
         device=str(cfg.train.device),
         num_classes=num_classes,
-        class_names=[str(x) for x in prepared["metadata"]["classes"]],
+        class_names=[str(x) for x in metadata["classes"]],
         target_label=attack_target_label,
         train_sample_indices=train_sample_indices,
         detection_sample_indices=train_sample_indices,
