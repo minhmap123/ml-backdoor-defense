@@ -1,0 +1,10 @@
+name: none
+seed: ${seed}
+
+# No-op detector for clean controls and unlearning methods that do not need
+# detector-provided sample flags.
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+requires_model: false
+requires_detection_split: false
+requires_clean_support_split: false

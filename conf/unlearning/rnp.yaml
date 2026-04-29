@@ -1,0 +1,38 @@
+name: rnp
+track_type: rnp
+seed: ${seed}
+auto_save_result: true
+artifact_root: artifacts/unlearning
+evaluation_batch_size: 512
+allow_empty_forget_set: true
+min_retained_samples: 1
+
+forget_set:
+  source: none
+  index_space: train_local
+
+evaluation:
+  train_split: false
+  forget_split: false
+  retain_split: false
+  per_class: true
+
+batch_size: 128
+momentum: 0.9
+weight_decay: 0.0005
+ratio: 0.01
+alpha: 0.2
+clean_threshold: 0.2
+unlearning_lr: 0.01
+recovering_lr: 0.2
+unlearning_epochs: 20
+recovering_epochs: 20
+schedule:
+  - 10
+  - 20
+pruning_by: threshold
+pruning_max: 0.9
+pruning_step: 0.05
+max_clean_accuracy_drop: 0.02
+save_checkpoint: true
+save_stage_checkpoints: true
