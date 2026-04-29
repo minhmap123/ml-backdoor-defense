@@ -5,6 +5,7 @@ from typing import Any
 from .abl import ABLUnlearner
 from .bad_teaching import BadTeachingUnlearner
 from .base import BaseUnlearner, NoOpUnlearner
+from .rnp import RNPUnlearner
 from .retrain import RetrainFromScratchUnlearner
 from .types import ForgetSet, UnlearningArtifacts, UnlearningContext, UnlearningResult
 
@@ -15,6 +16,7 @@ UNLEARNING_REGISTRY = {
     "badteaching": BadTeachingUnlearner,
     "none": NoOpUnlearner,
     "noop": NoOpUnlearner,
+    "rnp": RNPUnlearner,
     "retrain": RetrainFromScratchUnlearner,
     "oracle_retrain": RetrainFromScratchUnlearner,
     "detected_retrain": RetrainFromScratchUnlearner,
@@ -37,6 +39,7 @@ __all__ = [
     "BaseUnlearner",
     "ForgetSet",
     "NoOpUnlearner",
+    "RNPUnlearner",
     "RetrainFromScratchUnlearner",
     "UNLEARNING_REGISTRY",
     "UnlearningArtifacts",

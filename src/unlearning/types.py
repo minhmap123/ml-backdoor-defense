@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -14,6 +14,8 @@ def _to_jsonable(value: Any) -> Any:
         return value.to_jsonable()
     if isinstance(value, DictConfig):
         # Convert Hydra DictConfig to regular dict
+        return _to_jsonable(OmegaConf.to_container(value, resolve=True))
+    if isinstance(value, ListConfig):
         return _to_jsonable(OmegaConf.to_container(value, resolve=True))
     if isinstance(value, dict):
         return {str(k): _to_jsonable(v) for k, v in value.items()}
