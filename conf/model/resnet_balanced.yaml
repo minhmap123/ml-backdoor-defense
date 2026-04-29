@@ -1,0 +1,11 @@
+name: resnet
+n_blocks: 2
+d_block: 128
+d_hidden_multiplier: 2.0
+dropout1: 0.15
+dropout2: 0.0
+model_family: resnet
+
+# FAIRNESS NOTE: Reduced d_block from 192 to 128 for capacity-balanced benchmark.
+# Maintains paper architecture & training logic; focuses on parameter parity with other models.
+# For paper-faithful reproduction, see conf/model/resnet.yaml.

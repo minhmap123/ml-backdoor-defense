@@ -1,13 +1,16 @@
 name: retrain
-track_type: retrain
+track_type: scratch_retrain_control
 seed: ${seed}
 auto_save_result: true
 artifact_root: artifacts/unlearning
 evaluation_batch_size: 512
-allow_empty_forget_set: false
+allow_empty_forget_set: true
 min_retained_samples: 1
 forget_set:
-  source: detector_flags
+  # Control baseline: retrain from scratch on the full attacked train set.
+  # Detector-guided retraining is `detected_retrain`; oracle removal is
+  # `oracle_retrain`. Keeping this config distinct avoids duplicate baselines.
+  source: none
   topk: 0
   index_space: train_local
   score_threshold: null
@@ -17,7 +20,7 @@ forget_set:
   larger_scores_are_more_suspicious: true
 evaluation:
   train_split: false
-  forget_split: true
+  forget_split: false
   retain_split: false
   per_class: true
 train_overrides: {}

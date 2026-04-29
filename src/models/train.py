@@ -129,6 +129,8 @@ def train_torch_model(
     criterion = nn.CrossEntropyLoss()
     metadata = model.get_model_metadata() if hasattr(model, "get_model_metadata") else {"name": model.__class__.__name__}
     total_parameters = int(sum(parameter.numel() for parameter in model.parameters()))
+    trainable_parameters = int(sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad))
+    inactive_parameters = int(total_parameters - trainable_parameters)
 
     update_wandb_config(
         {
@@ -144,6 +146,9 @@ def train_torch_model(
             "model_runtime": {
                 "name": model.__class__.__name__,
                 "total_parameters": total_parameters,
+                "active_parameters": trainable_parameters,
+                "trainable_parameters": trainable_parameters,
+                "inactive_parameters": inactive_parameters,
                 **metadata,
             },
         }
@@ -257,10 +262,19 @@ def train_torch_model(
         {
             "train/epochs_completed": float(completed_epochs),
             "model/total_parameters": float(total_parameters),
+            "model/active_parameters": float(trainable_parameters),
+            "model/trainable_parameters": float(trainable_parameters),
+            "model/inactive_parameters": float(inactive_parameters),
             **_scalar_metrics_only(final_metrics),
         },
         step=completed_epochs or None,
     )
+
+    final_metrics["model/total_parameters"] = float(total_parameters)
+    final_metrics["model/active_parameters"] = float(trainable_parameters)
+    final_metrics["model/trainable_parameters"] = float(trainable_parameters)
+    final_metrics["model/inactive_parameters"] = float(inactive_parameters)
+    final_metrics["train/epochs_completed"] = float(completed_epochs)
 
     checkpoint_dir = save_model(
         model,

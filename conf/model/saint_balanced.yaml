@@ -1,0 +1,20 @@
+name: saint
+d_token: 8
+n_blocks: 1
+attention_n_heads: 2
+attention_dim_head: 4
+attention_dropout: 0.8
+ff_dropout: 0.8
+cont_embeddings: MLP
+attention_type: colrow
+final_mlp_style: sep
+learning_rate: 0.0001
+weight_decay: 0.01
+batch_size: 256
+epochs: 100
+model_family: saint
+
+# FAIRNESS NOTE: Aggressively reduced d_token from 32→8 and attention_n_heads from 4→2
+# for capacity-balanced benchmark. Reduces ~93% of parameters (31M → 2M).
+# Maintains SAINT core mechanisms (colrow attention, MLP embeddings, dropout strategy).
+# For paper-faithful reproduction, see conf/model/saint.yaml.

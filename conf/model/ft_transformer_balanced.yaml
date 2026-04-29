@@ -1,0 +1,13 @@
+name: ft_transformer
+n_blocks: 2
+d_token: 128
+attention_n_heads: 4
+attention_dropout: 0.2
+ffn_d_hidden_multiplier: 1.3333333333333333
+ffn_dropout: 0.1
+residual_dropout: 0.0
+model_family: ft_transformer
+
+# FAIRNESS NOTE: Reduced d_token from 192→128 and n_blocks from 3→2 for capacity-balanced benchmark.
+# Maintains FT-Transformer architecture; reduces ~70% of parameters for fair comparison.
+# For paper-faithful reproduction, see conf/model/ft_transformer.yaml.
