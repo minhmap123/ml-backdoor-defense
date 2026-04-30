@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Optional, Dict, Any, List
 
+import numpy as np
 import wandb
 
 
@@ -62,7 +63,22 @@ def _derive_wandb_tags(config: Dict[str, Any]) -> List[str]:
             tags.append(tag)
             seen.add(tag)
 
-    for key in ("attack", "model", "detection", "unlearning"):
+    # Determine which component tags to include based on the pipeline stage.
+    # For staged benchmarks, only tag components that are active in the current stage.
+    stage = str(config.get("pipeline", {}).get("stage", "attack_train")).strip().lower()
+    
+    # Define which components are active in each stage.
+    if stage in ("attack_train", "attack-train"):
+        active_components = {"attack", "model"}
+    elif stage == "detection":
+        active_components = {"attack", "model", "detection"}
+    elif stage == "unlearning":
+        active_components = {"attack", "model", "detection", "unlearning"}
+    else:
+        # Fallback: include all components for unknown stages.
+        active_components = {"attack", "model", "detection", "unlearning"}
+
+    for key in active_components:
         component_name = _resolve_component_name(config, key)
         if component_name is None:
             continue
@@ -106,6 +122,87 @@ def filter_wandb_summary_metrics(summary_metrics: Dict[str, Any], *, prefix: str
             continue
         filtered[str(key)] = value
     return filtered
+
+
+def as_wandb_summary_scalar(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (int, float, bool, str)) or value is None:
+        return value
+    return None
+
+
+def as_wandb_history_scalar(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (int, float, bool)):
+        return value
+    return None
+
+
+def update_wandb_summary_from_stage_payload(payload: Dict[str, Any], prefix: str, *, summary_profile: str) -> None:
+    if wandb.run is None or payload is None:
+        return
+
+    summary_updates = {
+        f"{prefix}/stage": payload.get("stage"),
+        f"{prefix}/run_id": payload.get("run_id"),
+        f"{prefix}/status": payload.get("status"),
+        f"{prefix}/track_type": payload.get("track_type"),
+        f"{prefix}/runtime_sec": payload.get("runtime_sec"),
+        f"{prefix}/stage_runtime_sec": payload.get("stage_runtime_sec"),
+        f"{prefix}/error_type": payload.get("error_type"),
+        f"{prefix}/error": payload.get("error"),
+    }
+
+    for attr in ("predicted_is_infected", "predicted_target_class", "predicted_source_class"):
+        if attr in payload:
+            summary_updates[f"{prefix}/{attr}"] = payload.get(attr)
+
+    summary_metrics = payload.get("summary_metrics", {}) or {}
+    summary_metrics = filter_wandb_summary_metrics(
+        summary_metrics,
+        prefix=prefix,
+        profile=summary_profile,
+    )
+    for key, value in summary_metrics.items():
+        summary_updates[str(key)] = value
+
+    try:
+        for key, value in summary_updates.items():
+            scalar_value = as_wandb_summary_scalar(value)
+            if scalar_value is not None:
+                wandb.run.summary[key] = scalar_value
+    except Exception as exc:
+        print(f"[W&B] Failed to update staged summary for {prefix}: {exc}")
+
+
+def log_wandb_stage_metrics_from_payload(payload: Dict[str, Any], prefix: str) -> None:
+    if wandb.run is None or payload is None:
+        return
+
+    metric_updates: Dict[str, Any] = {}
+    for key in ("runtime_sec", "stage_runtime_sec", "predicted_is_infected", "predicted_target_class", "predicted_source_class"):
+        scalar_value = as_wandb_history_scalar(payload.get(key))
+        if scalar_value is not None:
+            metric_updates[f"{prefix}/{key}"] = scalar_value
+
+    summary_metrics = payload.get("summary_metrics", {}) or {}
+    for key, value in summary_metrics.items():
+        scalar_value = as_wandb_history_scalar(value)
+        if scalar_value is not None:
+            metric_updates[str(key)] = scalar_value
+
+    if metric_updates:
+        log_metrics(metric_updates)
 
 
 def init_wandb(config: Dict[str, Any]) -> bool:

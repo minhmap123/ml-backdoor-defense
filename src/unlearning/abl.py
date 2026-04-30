@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
+from sklearn.metrics import precision_recall_fscore_support
 import torch
 import torch.nn as nn
 
@@ -13,10 +14,72 @@ from ..utils.logging import get_logger
 from .bad_teaching.utils import clone_model
 from .base import BaseUnlearner
 from .types import ForgetSet, UnlearningArtifacts, UnlearningContext, UnlearningResult
-from .utils import complement_indices, count_split_samples, subset_split
+from .utils import complement_indices, count_split_samples, get_obj_field, stable_unique_indices, subset_split
 
 
 LOGGER = get_logger("unlearning.abl")
+
+
+def _compute_internal_localization_metrics(
+    *,
+    loss_ranking: np.ndarray,
+    isolated_indices: np.ndarray,
+    poisoned_indices: Any,
+    num_train: int,
+) -> Dict[str, float]:
+    isolated = stable_unique_indices(isolated_indices, upper_bound=int(num_train))
+    metrics: Dict[str, float] = {
+        "abl/internal_localization_num_selected": float(len(isolated)),
+        "abl/internal_localization_selected_fraction": float(len(isolated) / max(int(num_train), 1)),
+    }
+
+    if poisoned_indices is None:
+        metrics["abl/internal_localization_oracle_available"] = 0.0
+        return metrics
+
+    poisoned = stable_unique_indices(poisoned_indices, upper_bound=int(num_train))
+    metrics["abl/internal_localization_oracle_available"] = 1.0
+    metrics["abl/internal_localization_num_poisoned"] = float(len(poisoned))
+
+    if len(poisoned) == 0:
+        metrics.update(
+            {
+                "abl/internal_localization_precision": 0.0,
+                "abl/internal_localization_recall": 0.0,
+                "abl/internal_localization_f1": 0.0,
+                "abl/internal_localization_topk": 0.0,
+                "abl/internal_localization_topk_recall": 0.0,
+                "abl/internal_localization_topk_hits": 0.0,
+            }
+        )
+        return metrics
+
+    y_true = np.zeros(int(num_train), dtype=np.int64)
+    y_pred = np.zeros(int(num_train), dtype=np.int64)
+    y_true[poisoned] = 1
+    y_pred[isolated] = 1
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        average="binary",
+        zero_division=0,
+    )
+
+    topk = min(len(poisoned), len(loss_ranking))
+    ranked_prefix = stable_unique_indices(loss_ranking[:topk], upper_bound=int(num_train))
+    topk_hits = int(np.intersect1d(ranked_prefix, poisoned, assume_unique=False).size)
+
+    metrics.update(
+        {
+            "abl/internal_localization_precision": float(precision),
+            "abl/internal_localization_recall": float(recall),
+            "abl/internal_localization_f1": float(f1),
+            "abl/internal_localization_topk": float(topk),
+            "abl/internal_localization_topk_recall": float(topk_hits / max(len(poisoned), 1)),
+            "abl/internal_localization_topk_hits": float(topk_hits),
+        }
+    )
+    return metrics
 
 
 class ABLUnlearner(BaseUnlearner):
@@ -152,6 +215,12 @@ class ABLUnlearner(BaseUnlearner):
         other_indices = complement_indices(num_train, isolated_indices)
         isolated_split = subset_split(train_split, isolated_indices)
         other_split = subset_split(train_split, other_indices)
+        internal_localization_metrics = _compute_internal_localization_metrics(
+            loss_ranking=loss_ranking,
+            isolated_indices=isolated_indices,
+            poisoned_indices=get_obj_field(context.attack_result, "poison_indices", None),
+            num_train=num_train,
+        )
 
         if self.stage2_init == "isolation_model":
             repair_model = clone_model(model_cfg, source_model=isolation_model).to(device)
@@ -314,6 +383,7 @@ class ABLUnlearner(BaseUnlearner):
             "abl/min_other_loss": float(sample_losses[other_indices].min()) if len(other_indices) > 0 else 0.0,
             "abl/mean_isolated_loss": float(sample_losses[isolated_indices].mean()) if len(isolated_indices) > 0 else 0.0,
             "abl/mean_other_loss": float(sample_losses[other_indices].mean()) if len(other_indices) > 0 else 0.0,
+            **internal_localization_metrics,
         }
         if isolation_checkpoint_dir is not None:
             summary_metrics["abl/isolation_checkpoint_saved"] = 1.0

@@ -10,11 +10,11 @@ defaults:
 seed: 42
 experiment_name: backdoor_unlearning_benchmark
 
-# Staged benchmark controls. The default `full` mode preserves the original
-# one-shot pipeline, while conference benchmark scripts should use
-# attack_train -> detection -> unlearning with explicit artifact paths.
+# Staged pipeline controls.
+# The benchmark runs attack_train -> detection -> unlearning with explicit
+# artifact paths between stages.
 pipeline:
-  stage: full
+  stage: attack_train
   run_id: null
   artifact_dir: null
   attack_train_artifact_dir: null
