@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.metrics import accuracy_score, f1_score, precision_recall_fscore_support
 
 from ..models.train import compute_backdoor_metrics
 from ..models.utils import parse_torch_batch, resolve_device as model_resolve_device, set_seed as model_set_seed, split_to_dataloader
@@ -196,6 +196,8 @@ def subset_split(split: Any, indices: Any) -> Any:
 def build_retain_datasets(datasets: Dict[str, Any], retain_indices: Any) -> Dict[str, Any]:
     retained = dict(datasets)
     retained["train"] = subset_split(datasets["train"], retain_indices)
+    if "train_class_weight_labels" in retained:
+        retained["train_class_weight_labels"] = _subset_value(retained["train_class_weight_labels"], retain_indices)
     return retained
 
 
@@ -261,9 +263,14 @@ def _evaluate_split(
     y_pred_np = np.concatenate(y_pred) if y_pred else np.empty((0,), dtype=np.int64)
     avg_loss = total_loss / max(total_batches, 1)
     accuracy = float(accuracy_score(y_true_np, y_pred_np)) if y_true_np.size > 0 else 0.0
+    f1_macro = float(f1_score(y_true_np, y_pred_np, average="macro", zero_division=0)) if y_true_np.size > 0 else 0.0
+    f1_weighted = float(f1_score(y_true_np, y_pred_np, average="weighted", zero_division=0)) if y_true_np.size > 0 else 0.0
     metrics = {
         f"{prefix}/loss": float(avg_loss),
         f"{prefix}/accuracy": float(accuracy),
+        f"{prefix}/f1": float(f1_macro),
+        f"{prefix}/f1_macro": float(f1_macro),
+        f"{prefix}/f1_weighted": float(f1_weighted),
     }
     if per_class and y_true_np.size > 0:
         for class_id in sorted(np.unique(y_true_np).astype(np.int64).tolist()):
@@ -354,12 +361,17 @@ def compute_delta_metrics(before: Dict[str, Any], after: Dict[str, Any]) -> Dict
     deltas: Dict[str, float] = {}
     pairs = {
         "unlearning/delta_clean_accuracy": "clean/test/accuracy",
+        "unlearning/delta_clean_f1": "clean/test/f1",
         "unlearning/delta_clean_val_accuracy": "clean/val/accuracy",
+        "unlearning/delta_clean_val_f1": "clean/val/f1",
         "unlearning/delta_clean_train_accuracy": "clean/train/accuracy",
+        "unlearning/delta_clean_train_f1": "clean/train/f1",
         "unlearning/delta_asr": "backdoor/asr",
         "unlearning/delta_backdoor_accuracy": "backdoor/accuracy",
         "unlearning/delta_forget_accuracy": "forget/train/accuracy",
+        "unlearning/delta_forget_f1": "forget/train/f1",
         "unlearning/delta_retain_accuracy": "retain/train/accuracy",
+        "unlearning/delta_retain_f1": "retain/train/f1",
     }
     for out_key, metric_key in pairs.items():
         if metric_key in before and metric_key in after:
@@ -473,6 +485,10 @@ def save_unlearning_artifacts(
         artifacts.forget_indices_npy = str(existing_artifacts.forget_indices_npy)
     if existing_artifacts.retain_indices_npy is not None:
         artifacts.retain_indices_npy = str(existing_artifacts.retain_indices_npy)
+    if existing_artifacts.train_sample_indices_npy is not None:
+        artifacts.train_sample_indices_npy = str(existing_artifacts.train_sample_indices_npy)
+    if existing_artifacts.detection_sample_indices_npy is not None:
+        artifacts.detection_sample_indices_npy = str(existing_artifacts.detection_sample_indices_npy)
 
     artifacts.metrics_before_json = _write_json(out / "metrics_before.json", _to_jsonable(result.metrics_before))
     artifacts.metrics_after_json = _write_json(out / "metrics_after.json", _to_jsonable(result.metrics_after))
@@ -485,6 +501,22 @@ def save_unlearning_artifacts(
     np.save(out / "retain_indices.npy", np.asarray(retain_indices, dtype=np.int64))
     artifacts.retain_indices_npy = str(out / "retain_indices.npy")
 
+    train_sample_indices = (
+        np.asarray(context.train_sample_indices, dtype=np.int64)
+        if context.train_sample_indices is not None
+        else np.empty((0,), dtype=np.int64)
+    )
+    np.save(out / "train_sample_indices.npy", train_sample_indices)
+    artifacts.train_sample_indices_npy = str(out / "train_sample_indices.npy")
+
+    detection_sample_indices = (
+        np.asarray(context.detection_sample_indices, dtype=np.int64)
+        if context.detection_sample_indices is not None
+        else np.empty((0,), dtype=np.int64)
+    )
+    np.save(out / "detection_sample_indices.npy", detection_sample_indices)
+    artifacts.detection_sample_indices_npy = str(out / "detection_sample_indices.npy")
+
     if result.checkpoint_dir is not None:
         artifacts.checkpoint_dir = str(result.checkpoint_dir)
 
@@ -493,9 +525,12 @@ def save_unlearning_artifacts(
         artifacts.extra_files["forget_scores_csv"] = forget_scores_csv
 
     result.artifacts = artifacts
+    context_payload = context.to_jsonable()
+    context_payload.pop("train_sample_indices", None)
+    context_payload.pop("detection_sample_indices", None)
     payload = {
         **result.to_summary_dict(),
-        "context": context.to_jsonable(),
+        "context": context_payload,
         "forget_set": forget_set.to_jsonable(),
         "resolved_cfg": _to_jsonable(resolved_cfg),
     }

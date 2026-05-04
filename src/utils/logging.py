@@ -13,6 +13,7 @@ _SUMMARY_HISTORY_METRICS = (
     ("clean/val/*", {}),
     ("clean/test/*", {}),
     ("clean/val_accuracy_best", {}),
+    ("clean/val_f1_best", {}),
     ("backdoor/*", {}),
     ("tabnet/*", {}),
 )

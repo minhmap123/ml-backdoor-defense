@@ -83,7 +83,7 @@ class CatBackAttacker(BaseAttacker):
         assert self.model is not None
         self.model.to(self.device)
         LOGGER.info("CatBack ready: model attached")
-        return super().inject(clean_features, clean_labels)
+        return super().inject(clean_features.astype(np.float32, copy=True), clean_labels)
 
     def _prepare_attack(self, clean_features: pd.DataFrame, clean_labels: pd.Series) -> None:
         LOGGER.info("CatBack step: prepare attack state")
@@ -183,9 +183,7 @@ class CatBackAttacker(BaseAttacker):
         x_poisoned = round_encoded_categoricals(x_poisoned, self.state.encoding)
         x_reverted = revert_encoded_categoricals(x_poisoned, self.state.encoding)
 
-        poisoned_batch = poison_batch.copy(deep=True)
-        poisoned_batch.loc[:, :] = x_reverted
-        return poisoned_batch
+        return pd.DataFrame(x_reverted, columns=poison_batch.columns, index=poison_batch.index)
 
     def _apply_label_strategy(self, poisoned_labels: pd.Series, poison_indices: np.ndarray) -> None:
         # Paper mode: dirty-label poisoning.

@@ -4,5 +4,7 @@ epochs: 100
 device: cuda
 learning_rate: 0.001
 weight_decay: 0.0
-patience: 10
+patience: 15
 log_every_steps: 20
+class_weight_mode: balanced
+selection_metric: clean/val/f1

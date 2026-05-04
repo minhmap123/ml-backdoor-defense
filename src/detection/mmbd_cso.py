@@ -138,11 +138,11 @@ class MMBDCSODetector(MMBDDetector):
         cso_state,
     ) -> Tuple[float, np.ndarray, np.ndarray, Dict[str, Any]]:
         candidates = self._sample_initial_inputs(lower_t=lower_t, upper_t=upper_t, device=device)
+        optimizer = torch.optim.SGD([candidates], lr=self.lr, momentum=self.sgd_momentum)
         last_loss = None
         steps_run = 0
 
         for step_idx in range(self.num_steps):
-            optimizer = torch.optim.SGD([candidates], lr=self.lr, momentum=self.sgd_momentum)
             optimizer.zero_grad()
             clamped = self._clamp_inputs(candidates, lower_t, upper_t)
             logits = model(clamped)

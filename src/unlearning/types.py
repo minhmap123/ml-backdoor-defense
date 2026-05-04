@@ -113,6 +113,8 @@ class UnlearningArtifacts:
     metrics_after_json: Optional[str] = None
     forget_indices_npy: Optional[str] = None
     retain_indices_npy: Optional[str] = None
+    train_sample_indices_npy: Optional[str] = None
+    detection_sample_indices_npy: Optional[str] = None
     checkpoint_dir: Optional[str] = None
     extra_files: Dict[str, str] = field(default_factory=dict)
 
@@ -123,6 +125,8 @@ class UnlearningArtifacts:
             "metrics_after_json": self.metrics_after_json,
             "forget_indices_npy": self.forget_indices_npy,
             "retain_indices_npy": self.retain_indices_npy,
+            "train_sample_indices_npy": self.train_sample_indices_npy,
+            "detection_sample_indices_npy": self.detection_sample_indices_npy,
             "checkpoint_dir": self.checkpoint_dir,
             "extra_files": dict(self.extra_files),
         }

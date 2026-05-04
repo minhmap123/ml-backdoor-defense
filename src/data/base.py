@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, QuantileTransformer, StandardScaler
 
 
 @dataclass(frozen=True)
@@ -41,28 +42,23 @@ class NumericIDSDataset(ABC):
         df.columns = [c.strip() for c in df.columns]
         return df
 
-    def clean(self, df: pd.DataFrame, *, near_constant_threshold: float | None = None) -> tuple[pd.DataFrame, dict]:
-        schema = self.schema if near_constant_threshold is None else replace(self.schema, near_constant_threshold=near_constant_threshold)
-        df = df.copy().drop_duplicates().reset_index(drop=True)
-        drop_cols = [c for c in schema.drop_columns if c in df.columns]
-        df = df.drop(columns=drop_cols, errors="ignore")
-        df = df.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
-
-        top_ratio = pd.Series({c: df[c].value_counts(normalize=True, dropna=False).iloc[0] for c in df.columns})
-        protected = set(schema.protected_label_columns)
-        constant_like = [c for c in top_ratio[top_ratio > schema.near_constant_threshold].index.tolist() if c not in protected]
-        df = df.drop(columns=constant_like, errors="ignore")
-
-        return df, {
-            "drop_columns": drop_cols,
-            "dropped_constant_like_columns": constant_like,
-            "clean_shape": list(df.shape),
-        }
-
+    @abstractmethod
+    def clean(self, *args, **kwargs):
+        """Clean a dataset in its dataset-specific way."""
+        raise NotImplementedError
+    
     @abstractmethod
     def prepare(self, *args, **kwargs):
         """Prepare a dataset in its dataset-specific way."""
         raise NotImplementedError
+
+    def _make_scaler(self) -> Pipeline:
+        return Pipeline(
+            [
+                ("quantile_transformer", QuantileTransformer(output_distribution="normal", random_state=self.schema.random_state)),
+                ("minmax_scaler", MinMaxScaler()),
+            ]
+        )
 
     def export_prepared(self, prepared: dict, *, output_dir: str | Path | None = None, target_column: str | None = None) -> Path:
         out = Path(output_dir or self.schema.raw_path.parents[2] / "1_processed" / self.schema.name)

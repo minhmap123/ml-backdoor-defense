@@ -22,8 +22,9 @@ SEED = 7
 SHOW_OUTPUT = True
 SKIP_EXISTING = True
 OUT_DIR = ROOT_DIR / "results" / "benchmark_runs" / time.strftime("%Y%m%d_%H%M%S")
+TRAIN_PROTOCOL = "natural_train_weighted_ce"
 
-ATTACKS = ["badnets", "tabdoor", "catback"]
+ATTACKS = ["catback", "tabdoor", "badnets"]
 MODELS = ["mlp", "resnet", "tabnet", "ft_transformer", "saint"]
 DETECTIONS = ["none", "spectral_signatures", "mlbd", "mm_bd", "neural_cleanse", "mlbd_cso", "mmbd_cso", "nc_cso"]
 UNLEARNINGS = ["oracle_retrain", "retrain", "detected_retrain", "bad_teaching", "abl", "rnp"]
@@ -73,13 +74,14 @@ def run_stage(
         f"attack.poison_rate={poison_rate}",
         f"attack.target_label={TARGET_LABEL}",
         f"attack.seed={seed}",
-        f"attack.trigger_features=[{TRIGGER_FEATURES}]",
         f"detection={detection}",
         f"unlearning={unlearning}",
         f"seed={seed}",
         f"train.device={DEVICE}",
         f"train.epochs={TRAIN_EPOCHS}",
         f"train.batch_size={TRAIN_BATCH_SIZE}",
+        "train.class_weight_mode=balanced",
+        "train.selection_metric=clean/val/f1",
         f"pipeline.stage={stage}",
         f"pipeline.run_id={run_id}",
         f"pipeline.artifact_dir={artifact_dir}",
@@ -95,8 +97,10 @@ def run_stage(
     if detection_artifact_dir is not None:
         overrides.append(f"pipeline.detection_artifact_dir={detection_artifact_dir}")
     if attack == "badnets":
+        overrides.append(f"attack.trigger_features=[{TRIGGER_FEATURES}]")
         overrides.append(f"attack.trigger_value={BADNETS_TRIGGER_VALUE}")
     elif attack == "tabdoor":
+        overrides.append(f"attack.trigger_features=[{TRIGGER_FEATURES}]")
         overrides.append(f"attack.trigger_size={TABDOOR_TRIGGER_SIZE}")
     elif attack == "catback":
         overrides.append(f"attack.device={DEVICE}")
@@ -146,7 +150,7 @@ def main() -> int:
             continue
 
         for model in MODELS:
-            attack_train_run_id = f"mode-attacked__attack-{attack}__seed{SEED}__model-{model}"
+            attack_train_run_id = f"mode-attacked__train-{TRAIN_PROTOCOL}__attack-{attack}__seed{SEED}__model-{model}"
             attack_train_artifact_dir = artifact_root / "attack_train" / attack_train_run_id
             attack_train_log = log_dir / f"{attack_train_run_id}__stage-attack_train.log"
 

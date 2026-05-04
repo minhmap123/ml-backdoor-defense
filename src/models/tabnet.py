@@ -152,8 +152,13 @@ class TabNet(BaseTabularModel):
         features = torch.sum(torch.stack(steps_output, dim=0), dim=0)
         return features
 
-    def compute_training_loss(self, logits: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        ce_loss = nn.functional.cross_entropy(logits, y_true)
+    def compute_training_loss(
+        self,
+        logits: torch.Tensor,
+        y_true: torch.Tensor,
+        class_weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        ce_loss = nn.functional.cross_entropy(logits, y_true, weight=class_weights)
         total_loss = ce_loss - self.lambda_sparse * self._last_m_loss
         self._last_train_step_metrics = {
             "tabnet/ce_loss": float(ce_loss.detach().item()),

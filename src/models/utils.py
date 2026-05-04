@@ -9,6 +9,12 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 
+def _to_torch(value: Any, *, dtype: torch.dtype, device: torch.device | None = None) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        return value.to(dtype=dtype, device=device)
+    return torch.tensor(np.array(value, copy=True), dtype=dtype, device=device)
+
+
 def set_seed(seed: Optional[int]) -> None:
     if seed is None:
         return
@@ -51,25 +57,25 @@ def split_to_numpy(split: Any) -> Tuple[np.ndarray, np.ndarray]:
 
 def split_to_dataloader(split: Any, *, batch_size: int, shuffle: bool) -> DataLoader:
     if isinstance(split, dict):
-        y = torch.as_tensor(split["y"], dtype=torch.long)
+        y = _to_torch(split["y"], dtype=torch.long)
         if "x" in split:
-            x = torch.as_tensor(split["x"], dtype=torch.float32)
+            x = _to_torch(split["x"], dtype=torch.float32)
             dataset = TensorDataset(x, y)
             return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
 
-        x_num = torch.as_tensor(split.get("x_num"), dtype=torch.float32)
+        x_num = _to_torch(split.get("x_num"), dtype=torch.float32)
         x_cat_raw = split.get("x_cat")
         if x_cat_raw is None:
             dataset = TensorDataset(x_num, y)
             return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
 
-        x_cat = torch.as_tensor(x_cat_raw, dtype=torch.long)
+        x_cat = _to_torch(x_cat_raw, dtype=torch.long)
         dataset = TensorDataset(x_num, x_cat, y)
         return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
 
     if isinstance(split, (tuple, list)):
-        x = torch.as_tensor(split[0], dtype=torch.float32)
-        y = torch.as_tensor(split[1], dtype=torch.long)
+        x = _to_torch(split[0], dtype=torch.float32)
+        y = _to_torch(split[1], dtype=torch.long)
         dataset = TensorDataset(x, y)
         return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
 
@@ -78,25 +84,25 @@ def split_to_dataloader(split: Any, *, batch_size: int, shuffle: bool) -> DataLo
 
 def parse_torch_batch(batch: Any, device: torch.device) -> Tuple[Any, torch.Tensor]:
     if isinstance(batch, dict):
-        y = torch.as_tensor(batch["y"], dtype=torch.long, device=device)
+        y = _to_torch(batch["y"], dtype=torch.long, device=device)
         if "x" in batch:
-            x = torch.as_tensor(batch["x"], dtype=torch.float32, device=device)
+            x = _to_torch(batch["x"], dtype=torch.float32, device=device)
             return x, y
-        x_num = torch.as_tensor(batch["x_num"], dtype=torch.float32, device=device)
+        x_num = _to_torch(batch["x_num"], dtype=torch.float32, device=device)
         x_cat = batch.get("x_cat")
         if x_cat is None:
             return {"x_num": x_num}, y
-        x_cat = torch.as_tensor(x_cat, dtype=torch.long, device=device)
+        x_cat = _to_torch(x_cat, dtype=torch.long, device=device)
         return {"x_num": x_num, "x_cat": x_cat}, y
 
     if isinstance(batch, (tuple, list)):
         if len(batch) == 3:
-            x_num = torch.as_tensor(batch[0], dtype=torch.float32, device=device)
-            x_cat = torch.as_tensor(batch[1], dtype=torch.long, device=device)
-            y = torch.as_tensor(batch[2], dtype=torch.long, device=device)
+            x_num = _to_torch(batch[0], dtype=torch.float32, device=device)
+            x_cat = _to_torch(batch[1], dtype=torch.long, device=device)
+            y = _to_torch(batch[2], dtype=torch.long, device=device)
             return {"x_num": x_num, "x_cat": x_cat}, y
-        x = torch.as_tensor(batch[0], dtype=torch.float32, device=device)
-        y = torch.as_tensor(batch[1], dtype=torch.long, device=device)
+        x = _to_torch(batch[0], dtype=torch.float32, device=device)
+        y = _to_torch(batch[1], dtype=torch.long, device=device)
         return x, y
 
     raise ValueError(f"Unsupported batch type: {type(batch)}")

@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 
 from ..utils.logging import get_logger, log_metrics, update_wandb_config
 from .utils import parse_torch_batch, resolve_device, save_model, set_seed, split_to_dataloader
@@ -20,6 +20,29 @@ def _scalar_metrics_only(metrics: Dict[str, Any]) -> Dict[str, float]:
         if isinstance(value, (int, float, np.integer, np.floating)):
             scalar_metrics[key] = float(value)
     return scalar_metrics
+
+
+def _class_weight_tensor(
+    datasets: Dict[str, Any],
+    *,
+    num_classes: int,
+    mode: str,
+    device: torch.device,
+) -> Optional[torch.Tensor]:
+    mode = str(mode or "none").strip().lower()
+    if mode in {"none", "off", "false", "0"}:
+        return None
+    if mode != "balanced":
+        raise ValueError(f"Unsupported class_weight_mode={mode!r}. Expected 'none' or 'balanced'.")
+
+    labels = np.asarray(datasets.get("train_class_weight_labels", datasets["train"]["y"]), dtype=np.int64)
+    counts = np.bincount(labels, minlength=int(num_classes)).astype(np.float32)
+    weights = np.zeros(int(num_classes), dtype=np.float32)
+    present = counts > 0
+    weights[present] = float(labels.size) / max(float(num_classes), 1.0) / counts[present]
+    if np.any(present):
+        weights[present] = weights[present] / max(float(weights[present].mean()), 1e-12)
+    return torch.tensor(weights, dtype=torch.float32, device=device)
 
 
 def _evaluate_torch_model(
@@ -55,10 +78,15 @@ def _evaluate_torch_model(
     y_pred_np = np.concatenate(y_pred) if y_pred else np.array([], dtype=np.int64)
     avg_loss = total_loss / max(total_batches, 1)
     acc = float(accuracy_score(y_true_np, y_pred_np)) if y_true_np.size > 0 else 0.0
+    f1_macro = float(f1_score(y_true_np, y_pred_np, average="macro", zero_division=0)) if y_true_np.size > 0 else 0.0
+    f1_weighted = float(f1_score(y_true_np, y_pred_np, average="weighted", zero_division=0)) if y_true_np.size > 0 else 0.0
 
     metrics: Dict[str, Any] = {
         f"{prefix}/loss": float(avg_loss),
         f"{prefix}/accuracy": float(acc),
+        f"{prefix}/f1": float(f1_macro),
+        f"{prefix}/f1_macro": float(f1_macro),
+        f"{prefix}/f1_weighted": float(f1_weighted),
     }
 
     if prefix.startswith("clean") and y_true_np.size > 0:
@@ -110,6 +138,8 @@ def train_torch_model(
     weight_decay = float(model_cfg.get("weight_decay", train_cfg.get("weight_decay", 0.0)))
     patience = int(model_cfg.get("patience", train_cfg.get("patience", 0)))
     save_dir = str(model_cfg.get("save_dir", train_cfg.get("save_dir", "artifacts/models")))
+    class_weight_mode = str(model_cfg.get("class_weight_mode", train_cfg.get("class_weight_mode", "balanced")))
+    selection_metric = str(model_cfg.get("selection_metric", train_cfg.get("selection_metric", "clean/val/f1")))
 
     seed = model_cfg.get("seed", train_cfg.get("seed", None))
     set_seed(seed)
@@ -126,7 +156,14 @@ def train_torch_model(
         )
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss()
+    num_classes = int(model_cfg.get("d_out", int(np.max(datasets["train"]["y"]) + 1)))
+    class_weights = _class_weight_tensor(
+        datasets,
+        num_classes=num_classes,
+        mode=class_weight_mode,
+        device=device,
+    )
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     metadata = model.get_model_metadata() if hasattr(model, "get_model_metadata") else {"name": model.__class__.__name__}
     total_parameters = int(sum(parameter.numel() for parameter in model.parameters()))
     trainable_parameters = int(sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad))
@@ -142,6 +179,8 @@ def train_torch_model(
                 "weight_decay": weight_decay,
                 "patience": patience,
                 "seed": seed,
+                "class_weight_mode": class_weight_mode,
+                "selection_metric": selection_metric,
             },
             "model_runtime": {
                 "name": model.__class__.__name__,
@@ -179,7 +218,8 @@ def train_torch_model(
         )
 
     best_state = None
-    best_val_acc = -1.0
+    best_score = -1.0
+    best_val_metrics: Dict[str, Any] = {}
     bad_epochs = 0
     completed_epochs = 0
 
@@ -194,7 +234,10 @@ def train_torch_model(
             optimizer.zero_grad(set_to_none=True)
             logits = model(model_input)
             if hasattr(model, "compute_training_loss"):
-                loss = model.compute_training_loss(logits, y)
+                try:
+                    loss = model.compute_training_loss(logits, y, class_weights=class_weights)
+                except TypeError:
+                    loss = model.compute_training_loss(logits, y)
             else:
                 loss = criterion(logits, y)
             loss.backward()
@@ -206,19 +249,23 @@ def train_torch_model(
         train_loss = running_loss / max(n_batches, 1)
 
         val_metrics = _evaluate_torch_model(model, loader=val_loader, device=device, prefix="clean/val")
-        val_acc = float(val_metrics["clean/val/accuracy"])
+        val_score = float(val_metrics.get(selection_metric, val_metrics["clean/val/accuracy"]))
 
         epoch_metrics = {
             "epoch": epoch + 1,
             "clean/train_loss": train_loss,
             **_scalar_metrics_only(val_metrics),
         }
+        if class_weights is not None:
+            for class_idx, weight in enumerate(class_weights.detach().cpu().numpy().tolist()):
+                epoch_metrics[f"train/class_weight_{class_idx}"] = float(weight)
         if hasattr(model, "get_training_step_metrics"):
             epoch_metrics.update(_scalar_metrics_only(model.get_training_step_metrics()))
         log_metrics(epoch_metrics, step=epoch + 1)
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_score > best_score:
+            best_score = val_score
+            best_val_metrics = dict(val_metrics)
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             bad_epochs = 0
         else:
@@ -232,7 +279,12 @@ def train_torch_model(
     test_metrics = _evaluate_torch_model(model, loader=test_loader, device=device, prefix="clean/test")
 
     final_metrics: Dict[str, Any] = {
-        "clean/val_accuracy_best": float(best_val_acc),
+        "clean/val_accuracy_best": float(best_val_metrics.get("clean/val/accuracy", 0.0)),
+        "clean/val_f1_best": float(best_val_metrics.get("clean/val/f1", 0.0)),
+        "clean/val_f1_macro_best": float(best_val_metrics.get("clean/val/f1_macro", 0.0)),
+        "train/selection_score_best": float(best_score),
+        "train/selection_metric": selection_metric,
+        "train/class_weight_mode": class_weight_mode,
         **test_metrics,
     }
 
@@ -275,6 +327,9 @@ def train_torch_model(
     final_metrics["model/trainable_parameters"] = float(trainable_parameters)
     final_metrics["model/inactive_parameters"] = float(inactive_parameters)
     final_metrics["train/epochs_completed"] = float(completed_epochs)
+    if class_weights is not None:
+        for class_idx, weight in enumerate(class_weights.detach().cpu().numpy().tolist()):
+            final_metrics[f"train/class_weight_{class_idx}"] = float(weight)
 
     checkpoint_dir = save_model(
         model,

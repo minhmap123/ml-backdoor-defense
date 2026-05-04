@@ -189,8 +189,6 @@ class NeuralCleanseDetector(BaseDetector):
     def _resolve_target_order(self, context: DetectorContext) -> List[int]:
         labels = list(range(int(context.num_classes)))
         priority = self.scan_priority_label
-        if priority is None and context.attack_target_label is not None:
-            priority = int(context.attack_target_label)
         if priority is not None and int(priority) in labels:
             labels.remove(int(priority))
             labels = [int(priority)] + labels

@@ -12,7 +12,7 @@ from .utils import extract_model_features, measure_runtime, rank_desc
 
 class SpectralSignaturesDetector(BaseDetector):
     """
-    Spectral Signatures detector with a repo-default IDS benchmark threshold mode.
+    Spectral Signatures detector that follows the original paper's per-class removal flow.
 
     Research references:
     - Paper: https://papers.nips.cc/paper_files/paper/2018/file/280cf18baf4311c92aa5a042336587d3-Paper.pdf
@@ -24,19 +24,13 @@ class SpectralSignaturesDetector(BaseDetector):
     - Feature representations are taken from `model.forward_features()`, so
       fidelity depends on each local model wrapper exposing the intended
       representation layer.
-    - `threshold_mode=paper` is kept for paper-style reproduction.
-    - `threshold_mode=ids_benchmark` is the repo-default path for IDS runs:
-      scores are standardized within each class and a global suspect budget is
-      applied across the whole detection split.
     """
 
     def __init__(self, cfg: Any) -> None:
         super().__init__(cfg)
         self.feature_batch_size = int(getattr(cfg, "feature_batch_size", 512))
-        self.threshold_mode = str(getattr(cfg, "threshold_mode", "ids_benchmark"))
         self.poison_rate_upper_bound = getattr(cfg, "poison_rate_upper_bound", None)
         self.removed_multiplier = float(getattr(cfg, "removed_multiplier", 1.5))
-        self.score_percentile = float(getattr(cfg, "score_percentile", 85.0))
         self.num_top_singular_vectors = int(getattr(cfg, "num_top_singular_vectors", 1))
         self.score_on_centered_features = bool(getattr(cfg, "score_on_centered_features", True))
         self.min_samples_per_class = int(getattr(cfg, "min_samples_per_class", 2))
@@ -44,11 +38,8 @@ class SpectralSignaturesDetector(BaseDetector):
 
     def _validate_context(self, context: DetectorContext) -> None:
         super()._validate_context(context)
-        assert self.threshold_mode in {"paper", "percentile", "ids_benchmark"}, (
-            f"Unsupported threshold_mode: {self.threshold_mode}"
-        )
-        if self.threshold_mode in {"paper", "ids_benchmark"}:
-            _ = self._resolve_poison_rate_upper_bound(context)
+        # Paper-mode per-class removal requires a poison-rate estimate.
+        _ = self._resolve_poison_rate_upper_bound(context)
 
     def _run_impl(self, context: DetectorContext) -> DetectorResult:
         (features, labels), runtime_sec = measure_runtime(
@@ -136,42 +127,29 @@ class SpectralSignaturesDetector(BaseDetector):
                 }
             )
 
-        if self.threshold_mode == "ids_benchmark":
-            decision_scores = self._build_ids_benchmark_scores(per_class_records, num_samples)
-            flagged_indices, global_threshold, budget = self._select_global_budget_flags(decision_scores, context)
-            global_flags[flagged_indices] = 1
-            self._annotate_ids_benchmark_stats(
-                per_class_records=per_class_records,
-                flagged_indices=flagged_indices,
-                decision_scores=decision_scores,
-                global_threshold=global_threshold,
-                budget=budget,
+        decision_scores = raw_scores.copy()
+        for record in per_class_records:
+            class_indices = record["class_indices"]
+            sample_scores = record["sample_scores"]
+            class_stat = record["class_stat"]
+            if sample_scores.size == 0:
+                continue
+            flagged_local, threshold, num_to_remove = self._select_per_class_flags(
+                sample_scores=sample_scores,
+                class_size=int(class_indices.size),
+                context=context,
             )
-        else:
-            decision_scores = raw_scores.copy()
-            for record in per_class_records:
-                class_indices = record["class_indices"]
-                sample_scores = record["sample_scores"]
-                class_stat = record["class_stat"]
-                if sample_scores.size == 0:
-                    continue
-                flagged_local, threshold, num_to_remove = self._select_per_class_flags(
-                    sample_scores=sample_scores,
-                    class_size=int(class_indices.size),
-                    context=context,
-                )
-                flagged_indices = class_indices[flagged_local]
-                global_flags[flagged_indices] = 1
-                class_stat.update(
-                    {
-                        "threshold_mode": self.threshold_mode,
-                        "threshold": threshold,
-                        "num_to_remove": int(num_to_remove),
-                        "num_flagged": int(flagged_local.size),
-                        "flagged_indices_local": flagged_local.tolist(),
-                        "flagged_indices_global": flagged_indices.tolist(),
-                    }
-                )
+            flagged_indices = class_indices[flagged_local]
+            global_flags[flagged_indices] = 1
+            class_stat.update(
+                {
+                    "threshold": threshold,
+                    "num_to_remove": int(num_to_remove),
+                    "num_flagged": int(flagged_local.size),
+                    "flagged_indices_local": flagged_local.tolist(),
+                    "flagged_indices_global": flagged_indices.tolist(),
+                }
+            )
 
         suspect_indices = np.flatnonzero(global_flags).astype(np.int64)
         ranking = rank_desc(decision_scores.astype(np.float32))
@@ -194,7 +172,6 @@ class SpectralSignaturesDetector(BaseDetector):
             thresholds=self._build_thresholds(context, num_samples),
             deviation_note=self._build_deviation_note(),
             optimization_trace={
-                "threshold_mode": self.threshold_mode,
                 "num_top_singular_vectors": self.num_top_singular_vectors,
                 "score_on_centered_features": self.score_on_centered_features,
                 "per_class_stats": [record["class_stat"] for record in per_class_records],
@@ -207,8 +184,7 @@ class SpectralSignaturesDetector(BaseDetector):
         if epsilon is None and context.attack_metadata is not None:
             epsilon = context.attack_metadata.get("poison_rate")
         assert epsilon is not None, (
-            f"{self.threshold_mode} threshold_mode requires poison_rate_upper_bound "
-            "or attack_metadata['poison_rate']"
+            "paper-mode requires poison_rate_upper_bound or attack_metadata['poison_rate']"
         )
         epsilon = float(epsilon)
         assert epsilon >= 0.0, f"poison_rate_upper_bound must be >= 0, got {epsilon}"
@@ -222,116 +198,24 @@ class SpectralSignaturesDetector(BaseDetector):
         context: DetectorContext,
     ) -> tuple[np.ndarray, float, int]:
         scores = np.asarray(sample_scores, dtype=np.float64)
-        if self.threshold_mode == "paper":
-            epsilon = self._resolve_poison_rate_upper_bound(context)
-            num_to_remove = int(ceil(self.removed_multiplier * epsilon * float(class_size)))
-            num_to_remove = max(0, min(num_to_remove, int(class_size)))
-            if num_to_remove == 0:
-                return np.empty((0,), dtype=np.int64), float("inf"), 0
-            order = np.argsort(scores)[::-1].astype(np.int64)
-            flagged_local = order[:num_to_remove]
-            threshold = float(scores[flagged_local[-1]])
-            return flagged_local, threshold, num_to_remove
-
-        threshold = float(np.percentile(scores, self.score_percentile))
-        flagged_local = np.flatnonzero(scores > threshold).astype(np.int64)
-        return flagged_local, threshold, int(flagged_local.size)
-
-    def _build_ids_benchmark_scores(
-        self,
-        per_class_records: List[Dict[str, Any]],
-        num_samples: int,
-    ) -> np.ndarray:
-        decision_scores = np.zeros(num_samples, dtype=np.float64)
-        for record in per_class_records:
-            class_indices = record["class_indices"]
-            sample_scores = np.asarray(record["sample_scores"], dtype=np.float64)
-            class_stat = record["class_stat"]
-            if sample_scores.size == 0:
-                continue
-            median = float(np.median(sample_scores))
-            mad = float(np.median(np.abs(sample_scores - median)))
-            scale = max(1.4826 * mad, 1e-12)
-            normalized = (sample_scores - median) / scale
-            decision_scores[class_indices] = normalized
-            class_stat.update(
-                {
-                    "threshold_mode": "ids_benchmark",
-                    "score_normalizer": "robust_zscore",
-                    "score_center": median,
-                    "score_scale": scale,
-                }
-            )
-        return decision_scores
-
-    def _select_global_budget_flags(
-        self,
-        decision_scores: np.ndarray,
-        context: DetectorContext,
-    ) -> tuple[np.ndarray, float, int]:
         epsilon = self._resolve_poison_rate_upper_bound(context)
-        budget = int(ceil(self.removed_multiplier * epsilon * float(decision_scores.shape[0])))
-        budget = max(0, min(budget, int(decision_scores.shape[0])))
-        if budget == 0:
+        num_to_remove = int(ceil(self.removed_multiplier * epsilon * float(class_size)))
+        num_to_remove = max(0, min(num_to_remove, int(class_size)))
+        if num_to_remove == 0:
             return np.empty((0,), dtype=np.int64), float("inf"), 0
-        ranking = np.argsort(decision_scores)[::-1].astype(np.int64)
-        flagged_indices = ranking[:budget]
-        global_threshold = float(decision_scores[flagged_indices[-1]])
-        return flagged_indices, global_threshold, budget
-
-    def _annotate_ids_benchmark_stats(
-        self,
-        *,
-        per_class_records: List[Dict[str, Any]],
-        flagged_indices: np.ndarray,
-        decision_scores: np.ndarray,
-        global_threshold: float,
-        budget: int,
-    ) -> None:
-        flagged_mask = np.zeros(decision_scores.shape[0], dtype=bool)
-        flagged_mask[flagged_indices] = True
-        for record in per_class_records:
-            class_indices = record["class_indices"]
-            class_stat = record["class_stat"]
-            if class_indices.size == 0:
-                continue
-            class_flagged_global = class_indices[flagged_mask[class_indices]]
-            class_flagged_local = np.flatnonzero(flagged_mask[class_indices]).astype(np.int64)
-            class_stat.update(
-                {
-                    "global_threshold": global_threshold,
-                    "global_budget": int(budget),
-                    "num_to_remove": int(class_flagged_global.size),
-                    "num_flagged": int(class_flagged_global.size),
-                    "flagged_indices_local": class_flagged_local.tolist(),
-                    "flagged_indices_global": class_flagged_global.tolist(),
-                    "max_normalized_score": float(np.max(decision_scores[class_indices])),
-                }
-            )
+        order = np.argsort(scores)[::-1].astype(np.int64)
+        flagged_local = order[:num_to_remove]
+        threshold = float(scores[flagged_local[-1]])
+        return flagged_local, threshold, num_to_remove
 
     def _build_thresholds(self, context: DetectorContext, num_samples: int) -> Dict[str, Any]:
-        thresholds: Dict[str, Any] = {"threshold_mode": self.threshold_mode}
-        if self.threshold_mode == "paper":
-            thresholds["poison_rate_upper_bound"] = self._resolve_poison_rate_upper_bound(context)
-            thresholds["removed_multiplier"] = self.removed_multiplier
-            return thresholds
-        if self.threshold_mode == "percentile":
-            thresholds["score_percentile"] = self.score_percentile
-            return thresholds
-
-        epsilon = self._resolve_poison_rate_upper_bound(context)
-        thresholds["poison_rate_upper_bound"] = epsilon
+        thresholds: Dict[str, Any] = {}
+        thresholds["poison_rate_upper_bound"] = self._resolve_poison_rate_upper_bound(context)
         thresholds["removed_multiplier"] = self.removed_multiplier
-        thresholds["score_normalizer"] = "robust_zscore"
-        thresholds["global_budget"] = int(ceil(self.removed_multiplier * epsilon * float(num_samples)))
         return thresholds
 
     def _build_deviation_note(self) -> str | None:
         notes: List[str] = []
-        if self.threshold_mode == "ids_benchmark":
-            notes.append("Local IDS benchmark extension: global budget over robust-zscore-normalized class scores.")
-        elif self.threshold_mode == "percentile":
-            notes.append("Local extension: threshold_mode=percentile.")
         if not self.score_on_centered_features:
             notes.append("Local extension: score_on_centered_features=False.")
         if self.num_top_singular_vectors != 1:

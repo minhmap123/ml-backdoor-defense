@@ -166,6 +166,10 @@ def _save_datasets(stage_dir: Path, datasets: Dict[str, Any]) -> Dict[str, Any]:
         "train_y": np.asarray(datasets["train"]["y"], dtype=np.int64),
         "train_clean_reference_x": np.asarray(datasets["train_clean_reference"]["x"], dtype=np.float32),
         "train_clean_reference_y": np.asarray(datasets["train_clean_reference"]["y"], dtype=np.int64),
+        "train_class_weight_labels": np.asarray(
+            datasets.get("train_class_weight_labels", datasets["train"]["y"]),
+            dtype=np.int64,
+        ),
         "val_x": np.asarray(datasets["val"]["x"], dtype=np.float32),
         "val_y": np.asarray(datasets["val"]["y"], dtype=np.int64),
         "val_triggered_x": np.asarray(datasets["val_triggered"]["x"], dtype=np.float32),
@@ -207,6 +211,7 @@ def _load_datasets(artifact_dir: str | Path) -> Dict[str, Any]:
             "x": arr("train_clean_reference_x"),
             "y": arr("train_clean_reference_y"),
         },
+        "train_class_weight_labels": arr("train_class_weight_labels") if "train_class_weight_labels" in arrays else arr("train_y"),
         "val": {"x": arr("val_x"), "y": arr("val_y")},
         "val_triggered": {"x": arr("val_triggered_x"), "y": arr("val_triggered_y")},
         "val_clean_labels": arr("val_clean_labels"),
@@ -247,14 +252,22 @@ def _load_model_from_attack_artifact(bundle: Dict[str, Any], device: str) -> tor
     return model
 
 
-def _build_feature_metadata(datasets: Dict[str, Any], attack_result: AttackResult) -> FeatureMetadata:
+def _build_feature_metadata(
+    datasets: Dict[str, Any], attack_result: AttackResult, metadata: Dict[str, Any] | None = None
+) -> FeatureMetadata:
+    
     train_x = np.asarray(datasets["train"]["x"], dtype=np.float32)
     feature_names = list(attack_result.poisoned_features.columns)
+    num_feats = int(train_x.shape[1])
+
+    lower = np.asarray(metadata["scaler_min"], dtype=np.float32)
+    upper = np.asarray(metadata["scaler_max"], dtype=np.float32)
+
     return FeatureMetadata(
         feature_names=feature_names,
-        feature_bounds_min=np.min(train_x, axis=0).astype(np.float32),
-        feature_bounds_max=np.max(train_x, axis=0).astype(np.float32),
-        num_numeric_features=int(train_x.shape[1]),
+        feature_bounds_min=lower,
+        feature_bounds_max=upper,
+        num_numeric_features=num_feats,
         num_categorical_features=0,
     )
 
@@ -304,7 +317,7 @@ def _build_detection_context(
         attack_metadata=_attack_metadata_from_bundle(bundle),
         detector_cfg=OmegaConf.to_container(cfg.detection, resolve=True),
         model_metadata=model_metadata,
-        feature_metadata=_build_feature_metadata(datasets, attack_result),
+        feature_metadata=_build_feature_metadata(datasets, attack_result, metadata),
         class_names=[str(x) for x in metadata["classes"]],
         sample_indices=np.arange(int(datasets["train"]["x"].shape[0]), dtype=np.int64),
         true_is_infected=is_infected,
@@ -432,7 +445,35 @@ def run_attack_train_stage(cfg: DictConfig) -> Dict[str, Any]:
     attack = get_attack(attack_cfg)
     print(f"Built attack: {attack.__class__.__name__}")
     dataset = _make_iotid20_dataset(int(cfg.seed))
-    datasets, metadata, attack_result = dataset.prepare(attack)
+    prepared = None
+    catback_surrogate = None
+    if str(cfg.attack.name).lower() == "catback":
+        prepared = dataset.prepare_clean_partitions()
+        surrogate_datasets = prepared["clean_datasets"]
+        surrogate_metadata = {"classes": prepared["encoder"].classes_.tolist()}
+        surrogate_model_cfg, surrogate_train_cfg = _prepare_model_train_cfg(
+            cfg,
+            surrogate_datasets,
+            surrogate_metadata,
+        )
+        surrogate_train_cfg["save_dir"] = str(stage_dir / "catback_surrogate_checkpoint")
+        surrogate_model = get_model(surrogate_model_cfg)
+        surrogate_model, surrogate_metrics = train_torch_model(
+            surrogate_model,
+            datasets=surrogate_datasets,
+            model_cfg=surrogate_model_cfg,
+            train_cfg=surrogate_train_cfg,
+        )
+        if hasattr(attack, "attach_model"):
+            attack.attach_model(surrogate_model)
+        catback_surrogate = {
+            "checkpoint_dir": surrogate_metrics.get("checkpoint_dir"),
+            "clean/val_accuracy_best": surrogate_metrics.get("clean/val_accuracy_best"),
+            "clean/val_f1_best": surrogate_metrics.get("clean/val_f1_best"),
+            "clean/test/accuracy": surrogate_metrics.get("clean/test/accuracy"),
+            "clean/test/f1": surrogate_metrics.get("clean/test/f1"),
+        }
+    datasets, metadata, attack_result = dataset.prepare(attack, prepared=prepared)
     attack_result.save(str(stage_dir / "attack_result"))
 
     model_cfg, train_cfg = _prepare_model_train_cfg(cfg, datasets, metadata)
@@ -471,6 +512,7 @@ def run_attack_train_stage(cfg: DictConfig) -> Dict[str, Any]:
         "model_cfg_json": str(stage_dir / "model_cfg.json"),
         "train_cfg_json": str(stage_dir / "train_cfg.json"),
         "model_metrics_json": str(stage_dir / "model_metrics.json"),
+        "catback_surrogate": catback_surrogate,
         "train_metrics": train_metrics,
         "summary_metrics": {
             **{k: v for k, v in train_metrics.items() if isinstance(v, (int, float, np.integer, np.floating))},
@@ -486,10 +528,11 @@ def run_attack_train_stage(cfg: DictConfig) -> Dict[str, Any]:
             "train_shape": metadata.get("train_shape"),
             "val_shape": metadata.get("val_shape"),
             "test_shape": metadata.get("test_shape"),
-            "imbalance_handling": metadata.get("imbalance_handling"),
             "attack_injection_stage": metadata.get("attack_injection_stage"),
             "dataset_random_state": metadata.get("dataset_random_state"),
             "sample_provenance_saved": metadata.get("sample_provenance_saved"),
+            "imbalance_protocol": metadata.get("imbalance_protocol"),
+            "class_counts": metadata.get("class_counts"),
         },
     }
     return _write_stage_summary(stage_dir, payload)
@@ -523,6 +566,10 @@ def run_detection_stage(cfg: DictConfig) -> Dict[str, Any]:
     if nested_summary:
         shutil.copyfile(nested_summary, stage_dir / "detector_summary.json")
 
+    context_payload = context.to_jsonable()
+    context_payload.pop("poisoned_indices", None)
+    context_payload.pop("sample_indices", None)
+
     payload = {
         **detection_result.to_summary_dict(),
         "stage": "detection",
@@ -535,7 +582,7 @@ def run_detection_stage(cfg: DictConfig) -> Dict[str, Any]:
         "source_attack_train_artifact_dir": str(attack_train_dir),
         "resolved_config_yaml": resolved_config_path,
         "detector_summary_json": str(stage_dir / "detector_summary.json") if nested_summary else None,
-        "context": context.to_jsonable(),
+        "context": context_payload,
         "resolved_cfg": OmegaConf.to_container(cfg.detection, resolve=True),
     }
     return _write_stage_summary(stage_dir, payload)
@@ -571,7 +618,7 @@ def run_unlearning_stage(cfg: DictConfig) -> Dict[str, Any]:
     attack_result = bundle["attack_result"]
     train_sample_indices = np.arange(int(datasets["train"]["x"].shape[0]), dtype=np.int64)
     attack_target_label = int(attack_result.target_label)
-    feature_metadata = _build_feature_metadata(datasets, attack_result)
+    feature_metadata = _build_feature_metadata(datasets, attack_result, metadata)
     attack_metadata = _attack_metadata_from_bundle(bundle)
 
     unlearning_result = unlearner.run(

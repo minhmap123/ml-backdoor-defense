@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -33,6 +34,12 @@ class BaseTabularModel(nn.Module, ABC):
         self.hidden_dim = None if hidden_dim is None else int(hidden_dim)
 
     @staticmethod
+    def _to_tensor(value: Any, *, dtype: torch.dtype) -> torch.Tensor:
+        if isinstance(value, torch.Tensor):
+            return value.to(dtype=dtype)
+        return torch.tensor(np.array(value, copy=True), dtype=dtype)
+
+    @staticmethod
     def parse_input(x: Any) -> ParsedModelInput:
         """Normalize accepted input formats into a unified parsed object."""
         if isinstance(x, ParsedModelInput):
@@ -40,27 +47,27 @@ class BaseTabularModel(nn.Module, ABC):
 
         if isinstance(x, dict):
             if "x" in x:
-                return ParsedModelInput(x=torch.as_tensor(x["x"]).float())
+                return ParsedModelInput(x=BaseTabularModel._to_tensor(x["x"], dtype=torch.float32))
             x_num = x.get("x_num")
             x_cat = x.get("x_cat")
             return ParsedModelInput(
-                x_num=None if x_num is None else torch.as_tensor(x_num).float(),
-                x_cat=None if x_cat is None else torch.as_tensor(x_cat).long(),
+                x_num=None if x_num is None else BaseTabularModel._to_tensor(x_num, dtype=torch.float32),
+                x_cat=None if x_cat is None else BaseTabularModel._to_tensor(x_cat, dtype=torch.long),
             )
 
         if isinstance(x, (tuple, list)):
             if len(x) == 2:
-                first = torch.as_tensor(x[0])
-                second = torch.as_tensor(x[1])
+                first = BaseTabularModel._to_tensor(x[0], dtype=torch.float32)
+                second = BaseTabularModel._to_tensor(x[1], dtype=torch.long)
                 # Dataloader format (x, y): ignore y for model input parsing
                 if first.ndim >= 2 and second.ndim == 1:
-                    return ParsedModelInput(x=first.float())
+                    return ParsedModelInput(x=first)
                 # Mixed tabular format (x_num, x_cat)
-                return ParsedModelInput(x_num=first.float(), x_cat=second.long())
+                return ParsedModelInput(x_num=first, x_cat=second)
             if len(x) == 1:
-                return ParsedModelInput(x=torch.as_tensor(x[0]).float())
+                return ParsedModelInput(x=BaseTabularModel._to_tensor(x[0], dtype=torch.float32))
 
-        return ParsedModelInput(x=torch.as_tensor(x).float())
+        return ParsedModelInput(x=BaseTabularModel._to_tensor(x, dtype=torch.float32))
 
     @staticmethod
     def _flatten_numeric_and_categorical(parsed: ParsedModelInput) -> torch.Tensor:

@@ -3,19 +3,9 @@ seed: ${seed}
 auto_save_result: true
 detection_artifact_root: artifacts/detection
 
-# IDS benchmark defaults.
-# Paper: https://papers.nips.cc/paper_files/paper/2018/file/280cf18baf4311c92aa5a042336587d3-Paper.pdf
-# Official repo audited for deviations: https://github.com/MadryLab/backdoor_data_poisoning
-
 feature_batch_size: 512
-# Available:
-# - ids_benchmark: repo default for unknown-target IDS runs
-# - paper: paper-style per-class removal
-# - percentile: local ablation / official-style thresholding
-threshold_mode: ids_benchmark
-poison_rate_upper_bound: 0.10
-removed_multiplier: 1.5
-score_percentile: 85.0
+poison_rate_upper_bound: null
+removed_multiplier: 1.0
 num_top_singular_vectors: 1
 score_on_centered_features: true
 min_samples_per_class: 20
