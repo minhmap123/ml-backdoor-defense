@@ -5,7 +5,7 @@
 data/0_raw/
 data/1_processed/
 data/artifacts/
-!data/notebooks/
+data/notebooks/
 # Preserve folder structure
 !data/.gitkeep
 !data/0_raw/.gitkeep
