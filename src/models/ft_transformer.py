@@ -334,9 +334,6 @@ class FTTransformer(BaseTabularModel):
                 "num_categorical_features": self.num_categorical_features,
                 "categorical_cardinalities": list(self.cat_cardinalities),
                 "embedding_dim": self.embedding_dim,
-                "source_reference": "yandex-research/rtdl-revisiting-models",
-                "source_repository_url": "https://github.com/yandex-research/rtdl-revisiting-models",
-                "paper_url": "https://arxiv.org/abs/2106.11959",
                 "implementation_style": "official-code-derived-wrapper",
             }
         )

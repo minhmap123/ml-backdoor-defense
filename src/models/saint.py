@@ -185,10 +185,6 @@ class SAINT(BaseTabularModel):
                 "attention_type": self.attention_type,
                 "cont_embeddings": self.cont_embeddings,
                 "final_mlp_style": self.final_mlp_style,
-                "source_reference": "somepago/saint",
-                "source_repository_url": "https://github.com/somepago/saint",
-                "source_commit": "e288e84c77a54cfd2ffb55a53678fb7cbbb16630",
-                "paper_url": "https://arxiv.org/abs/2106.01342",
                 "implementation_style": "author-code-derived-core-plus-wrapper",
                 "missingness_assumption": "fully_observed_features",
             }

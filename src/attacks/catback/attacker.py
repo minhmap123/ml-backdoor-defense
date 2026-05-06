@@ -62,6 +62,8 @@ class CatBackAttacker(BaseAttacker):
         self.batch_size = int(getattr(cfg, "batch_size", 128))
         self.patience = int(getattr(cfg, "patience", 30))
         self.device = torch.device(str(getattr(cfg, "device", "cpu")))
+        self.poison_selection = str(getattr(cfg, "poison_selection", "random")).lower()
+        self.poison_candidate_pool = str(getattr(cfg, "poison_candidate_pool", "all")).lower()
 
         self.categorical_columns = getattr(cfg, "categorical_columns", None)
         self.numerical_columns = getattr(cfg, "numerical_columns", None)
@@ -167,8 +169,23 @@ class CatBackAttacker(BaseAttacker):
     def _get_poison_indices(self, clean_labels: pd.Series) -> np.ndarray:
         assert self.state is not None
 
-        count = self._num_poison_samples(len(clean_labels), len(self.state.ranked_indices))
-        return self.state.ranked_indices[:count].astype(np.int64, copy=False)
+        if self.poison_selection == "ranked":
+            count = self._num_poison_samples(len(clean_labels), len(self.state.ranked_indices))
+            return self.state.ranked_indices[:count].astype(np.int64, copy=False)
+
+        if self.poison_selection != "random":
+            raise ValueError(f"Unsupported CatBack poison_selection: {self.poison_selection}")
+
+        y = clean_labels.to_numpy(copy=False)
+        if self.poison_candidate_pool == "all":
+            candidate_indices = np.arange(len(clean_labels), dtype=np.int64)
+        elif self.poison_candidate_pool == "non_target":
+            candidate_indices = np.flatnonzero(y != self.target_label).astype(np.int64)
+        else:
+            raise ValueError(f"Unsupported CatBack poison_candidate_pool: {self.poison_candidate_pool}")
+
+        count = self._num_poison_samples(len(clean_labels), len(candidate_indices))
+        return self._sample_poison_indices(candidate_indices, count).astype(np.int64, copy=False)
 
     def _apply_trigger(self, poison_batch: pd.DataFrame) -> pd.DataFrame:
         assert self.state is not None
@@ -201,6 +218,8 @@ class CatBackAttacker(BaseAttacker):
             "device": str(self.device),
             "label_mode": "dirty",
             "candidate_strategy": "non_target",
+            "poison_selection": self.poison_selection,
+            "poison_candidate_pool": self.poison_candidate_pool,
             "surrogate_source": "external",
         }
 

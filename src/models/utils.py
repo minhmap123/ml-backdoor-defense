@@ -55,29 +55,29 @@ def split_to_numpy(split: Any) -> Tuple[np.ndarray, np.ndarray]:
     raise ValueError(f"Unsupported split type: {type(split)}")
 
 
-def split_to_dataloader(split: Any, *, batch_size: int, shuffle: bool) -> DataLoader:
+def split_to_dataloader(split: Any, *, batch_size: int, shuffle: bool, drop_last: bool = False) -> DataLoader:
     if isinstance(split, dict):
         y = _to_torch(split["y"], dtype=torch.long)
         if "x" in split:
             x = _to_torch(split["x"], dtype=torch.float32)
             dataset = TensorDataset(x, y)
-            return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
+            return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle), drop_last=bool(drop_last))
 
         x_num = _to_torch(split.get("x_num"), dtype=torch.float32)
         x_cat_raw = split.get("x_cat")
         if x_cat_raw is None:
             dataset = TensorDataset(x_num, y)
-            return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
+            return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle), drop_last=bool(drop_last))
 
         x_cat = _to_torch(x_cat_raw, dtype=torch.long)
         dataset = TensorDataset(x_num, x_cat, y)
-        return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
+        return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle), drop_last=bool(drop_last))
 
     if isinstance(split, (tuple, list)):
         x = _to_torch(split[0], dtype=torch.float32)
         y = _to_torch(split[1], dtype=torch.long)
         dataset = TensorDataset(x, y)
-        return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle))
+        return DataLoader(dataset, batch_size=int(batch_size), shuffle=bool(shuffle), drop_last=bool(drop_last))
 
     raise ValueError(f"Unsupported split type: {type(split)}")
 

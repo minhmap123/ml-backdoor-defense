@@ -7,6 +7,10 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+from ...utils.logging import get_logger
+
+
+LOGGER = get_logger("attacks.catback.logic")
 
 
 # NOTE:
@@ -254,7 +258,7 @@ def optimize_trigger_delta(
     best_delta = delta.detach().clone()
     stale_steps = 0
 
-    for _ in range(int(num_steps)):
+    for step in range(int(num_steps)):
         epoch_loss = 0.0
         for (xb,) in loader:
             xb = xb.to(device)
@@ -278,6 +282,7 @@ def optimize_trigger_delta(
             epoch_loss += float(loss.item())
 
         avg_loss = epoch_loss / max(len(loader), 1)
+        LOGGER.info("CatBack optimize step %d/%d avg_loss=%.6f best_loss=%.6f", step + 1, int(num_steps), avg_loss, float(best_loss))
         if avg_loss < best_loss:
             best_loss = avg_loss
             best_delta = delta.detach().clone()

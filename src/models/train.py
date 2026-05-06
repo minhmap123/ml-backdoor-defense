@@ -140,22 +140,41 @@ def train_torch_model(
     save_dir = str(model_cfg.get("save_dir", train_cfg.get("save_dir", "artifacts/models")))
     class_weight_mode = str(model_cfg.get("class_weight_mode", train_cfg.get("class_weight_mode", "balanced")))
     selection_metric = str(model_cfg.get("selection_metric", train_cfg.get("selection_metric", "clean/val/f1")))
+    optimizer_name = str(model_cfg.get("optimizer_name", train_cfg.get("optimizer_name", "auto"))).strip().lower()
+    clip_grad_norm = model_cfg.get("clip_grad_norm", train_cfg.get("clip_grad_norm", None))
+    clip_grad_norm = None if clip_grad_norm is None else float(clip_grad_norm)
+    drop_last = bool(model_cfg.get("drop_last", train_cfg.get("drop_last", False)))
 
     seed = model_cfg.get("seed", train_cfg.get("seed", None))
     set_seed(seed)
 
-    train_loader = split_to_dataloader(datasets["train"], batch_size=batch_size, shuffle=True)
+    train_loader = split_to_dataloader(datasets["train"], batch_size=batch_size, shuffle=True, drop_last=drop_last)
     val_loader = split_to_dataloader(datasets["val"], batch_size=batch_size, shuffle=False)
     test_loader = split_to_dataloader(datasets["test"], batch_size=batch_size, shuffle=False)
 
-    if hasattr(model, "make_parameter_groups"):
+    use_parameter_groups = hasattr(model, "make_parameter_groups")
+    if optimizer_name == "auto":
+        optimizer_name = "adamw" if use_parameter_groups else "adam"
+
+    if optimizer_name == "adamw" and use_parameter_groups:
         optimizer = torch.optim.AdamW(
             model.make_parameter_groups(weight_decay=weight_decay),
             lr=learning_rate,
             weight_decay=0.0,
         )
+    elif optimizer_name == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    elif optimizer_name == "adam":
+        if use_parameter_groups:
+            optimizer = torch.optim.Adam(
+                model.make_parameter_groups(weight_decay=weight_decay),
+                lr=learning_rate,
+                weight_decay=0.0,
+            )
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        raise ValueError(f"Unsupported optimizer_name={optimizer_name!r}. Expected auto, adam, or adamw.")
     num_classes = int(model_cfg.get("d_out", int(np.max(datasets["train"]["y"]) + 1)))
     class_weights = _class_weight_tensor(
         datasets,
@@ -181,6 +200,9 @@ def train_torch_model(
                 "seed": seed,
                 "class_weight_mode": class_weight_mode,
                 "selection_metric": selection_metric,
+                "optimizer_name": optimizer_name,
+                "clip_grad_norm": clip_grad_norm,
+                "drop_last": drop_last,
             },
             "model_runtime": {
                 "name": model.__class__.__name__,
@@ -193,13 +215,15 @@ def train_torch_model(
         }
     )
     LOGGER.info(
-        "Training %s on %s for %d epochs (batch_size=%d, lr=%g, weight_decay=%g, params=%d)",
+        "Training %s on %s for %d epochs (batch_size=%d, lr=%g, weight_decay=%g, optimizer=%s, clip_grad_norm=%s, params=%d)",
         model.__class__.__name__,
         device,
         epochs,
         batch_size,
         learning_rate,
         weight_decay,
+        optimizer_name,
+        clip_grad_norm,
         total_parameters,
     )
     if metadata.get("model_family") == "saint":
@@ -241,6 +265,8 @@ def train_torch_model(
             else:
                 loss = criterion(logits, y)
             loss.backward()
+            if clip_grad_norm is not None and clip_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad_norm)
             optimizer.step()
 
             running_loss += float(loss.item())

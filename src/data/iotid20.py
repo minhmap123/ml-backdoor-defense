@@ -94,23 +94,36 @@ class IoTID20Dataset(NumericIDSDataset):
         y_val = pd.Series(encoder.transform(y_val_raw), dtype=np.int64).reset_index(drop=True)
         y_test = pd.Series(encoder.transform(y_test_raw), dtype=np.int64).reset_index(drop=True)
 
-        # Scale clean data for CatBack surrogate model training
+        # Clean model inputs are scaled once and reused by CatBack's numeric-only path.
         scaler = self._make_scaler()
         x_train_scaled = scaler.fit_transform(x_train_raw)
         x_val_scaled = scaler.transform(x_val_raw)
         x_test_scaled = scaler.transform(x_test_raw)
-        
+        feature_names = [str(col) for col in x_train_raw.columns]
+        x_train_scaled_frame = pd.DataFrame(
+            x_train_scaled.astype(np.float32),
+            columns=feature_names,
+        ).reset_index(drop=True)
+        x_val_scaled_frame = pd.DataFrame(
+            x_val_scaled.astype(np.float32),
+            columns=feature_names,
+        ).reset_index(drop=True)
+        x_test_scaled_frame = pd.DataFrame(
+            x_test_scaled.astype(np.float32),
+            columns=feature_names,
+        ).reset_index(drop=True)
+
         clean_datasets = {
             "train": {
-                "x": x_train_scaled.astype(np.float32),
+                "x": x_train_scaled_frame.to_numpy(dtype=np.float32, copy=False),
                 "y": y_train.to_numpy(dtype=np.int64, copy=False),
             },
             "val": {
-                "x": x_val_scaled.astype(np.float32),
+                "x": x_val_scaled_frame.to_numpy(dtype=np.float32, copy=False),
                 "y": y_val.to_numpy(dtype=np.int64, copy=False),
             },
             "test": {
-                "x": x_test_scaled.astype(np.float32),
+                "x": x_test_scaled_frame.to_numpy(dtype=np.float32, copy=False),
                 "y": y_test.to_numpy(dtype=np.int64, copy=False),
             },
             "train_class_weight_labels": y_train.to_numpy(dtype=np.int64, copy=False),
@@ -129,6 +142,11 @@ class IoTID20Dataset(NumericIDSDataset):
             "x_train_raw": x_train_raw.reset_index(drop=True),
             "x_val_raw": x_val_raw.reset_index(drop=True),
             "x_test_raw": x_test_raw.reset_index(drop=True),
+            "x_train_scaled": x_train_scaled_frame,
+            "x_val_scaled": x_val_scaled_frame,
+            "x_test_scaled": x_test_scaled_frame,
+            "scaler": scaler,
+            "feature_names": feature_names,
             "y_train": y_train,
             "y_val": y_val,
             "y_test": y_test,
@@ -141,22 +159,58 @@ class IoTID20Dataset(NumericIDSDataset):
 
     def prepare(self, attack, prepared: dict | None = None) -> tuple[dict, dict, object]:
         prepared = self.prepare_clean_partitions() if prepared is None else prepared
+        attack_name = str(getattr(attack, "name", "")).lower()
 
-        attack_result = attack.inject(
-            clean_features=prepared["x_train_raw"],
-            clean_labels=prepared["y_train"].copy(deep=True),
-        )
+        if attack_name == "catback":
+            # Official numeric-only CatBack operates in the same scaled/converted
+            # feature space consumed by the surrogate and victim models.
+            attack_result = attack.inject(
+                clean_features=prepared["x_train_scaled"].copy(deep=True),
+                clean_labels=prepared["y_train"].copy(deep=True),
+            )
+            x_train_poisoned = attack_result.poisoned_features.copy(deep=True)
+            x_train_clean_reference = prepared["x_train_scaled"].copy(deep=True)
+            x_val = prepared["x_val_scaled"].copy(deep=True)
+            x_test = prepared["x_test_scaled"].copy(deep=True)
+            x_val_triggered = attack.apply_trigger_to_features(prepared["x_val_scaled"])
+            x_test_triggered = attack.apply_trigger_to_features(prepared["x_test_scaled"])
+            output_scaler = prepared["scaler"]
+            attack_injection_stage = "post_scaler_model_feature_space"
+        else:
+            attack_result = attack.inject(
+                clean_features=prepared["x_train_raw"],
+                clean_labels=prepared["y_train"].copy(deep=True),
+            )
 
-        x_val_triggered_raw = attack.apply_trigger_to_features(prepared["x_val_raw"])
-        x_test_triggered_raw = attack.apply_trigger_to_features(prepared["x_test_raw"])
+            x_val_triggered_raw = attack.apply_trigger_to_features(prepared["x_val_raw"])
+            x_test_triggered_raw = attack.apply_trigger_to_features(prepared["x_test_raw"])
 
-        scaler = self._make_scaler()
-        x_train_poisoned = pd.DataFrame(scaler.fit_transform(attack_result.poisoned_features), columns=prepared["x_train_raw"].columns)
-        x_train_clean_reference = pd.DataFrame(scaler.transform(prepared["x_train_raw"]), columns=prepared["x_train_raw"].columns)
-        x_val = pd.DataFrame(scaler.transform(prepared["x_val_raw"]), columns=prepared["x_val_raw"].columns)
-        x_test = pd.DataFrame(scaler.transform(prepared["x_test_raw"]), columns=prepared["x_test_raw"].columns)
-        x_val_triggered = pd.DataFrame(scaler.transform(x_val_triggered_raw), columns=x_val_triggered_raw.columns)
-        x_test_triggered = pd.DataFrame(scaler.transform(x_test_triggered_raw), columns=x_test_triggered_raw.columns)
+            output_scaler = self._make_scaler()
+            x_train_poisoned = pd.DataFrame(
+                output_scaler.fit_transform(attack_result.poisoned_features),
+                columns=prepared["x_train_raw"].columns,
+            )
+            x_train_clean_reference = pd.DataFrame(
+                output_scaler.transform(prepared["x_train_raw"]),
+                columns=prepared["x_train_raw"].columns,
+            )
+            x_val = pd.DataFrame(
+                output_scaler.transform(prepared["x_val_raw"]),
+                columns=prepared["x_train_raw"].columns,
+            )
+            x_test = pd.DataFrame(
+                output_scaler.transform(prepared["x_test_raw"]),
+                columns=prepared["x_train_raw"].columns,
+            )
+            x_val_triggered = pd.DataFrame(
+                output_scaler.transform(x_val_triggered_raw),
+                columns=x_val_triggered_raw.columns,
+            )
+            x_test_triggered = pd.DataFrame(
+                output_scaler.transform(x_test_triggered_raw),
+                columns=x_test_triggered_raw.columns,
+            )
+            attack_injection_stage = "preprocess_before_scaler"
 
         poisoned_labels = attack_result.get_poisoned_labels(prepared["y_train"].copy(deep=True))
         train_provenance = self._make_provenance("train", prepared["row_train"], prepared["y_train"])
@@ -201,7 +255,7 @@ class IoTID20Dataset(NumericIDSDataset):
             },
         }
 
-        minmax = scaler.named_steps["minmax_scaler"]
+        minmax = output_scaler.named_steps["minmax_scaler"]
         metadata = {
             "dataset": self.schema.name,
             "classes": prepared["encoder"].classes_.tolist(),
@@ -212,7 +266,11 @@ class IoTID20Dataset(NumericIDSDataset):
             "scaler": self.SCALER_TYPE,
             "scaler_min": np.asarray(minmax.data_min_, dtype=np.float32).tolist(),
             "scaler_max": np.asarray(minmax.data_max_, dtype=np.float32).tolist(),
-            "attack_injection_stage": "preprocess_before_scaler",
+            "attack_injection_stage": attack_injection_stage,
+            "attack_feature_space": (
+                "scaled_model_input" if attack_name == "catback" else "raw_before_preprocessing"
+            ),
+            "catback_numeric_only_official_mode": bool(attack_name == "catback"),
             "imbalance_protocol": "balanced_cross_entropy_from_train_labels",
             "dataset_random_state": int(self.schema.random_state),
             "class_counts": prepared["split_counts"],

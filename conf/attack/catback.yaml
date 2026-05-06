@@ -6,7 +6,7 @@ seed: ${seed}
 # Paper-faithful CatBack hyperparameters.
 # Paper: https://arxiv.org/abs/2511.06072
 # Official repo: https://github.com/catback-tabular/catback.git
-mu: 0.2
+mu: 1.0
 beta: 0.1
 l2_lambda: 0.1
 lr: 0.0001
@@ -15,13 +15,18 @@ batch_size: 128
 patience: 30
 device: cpu
 
+# Official CatBack uses confidence ranking only to build D_picked for trigger
+# optimization, then randomly poisons epsilon*N training samples.
+poison_selection: random
+poison_candidate_pool: all
+
 # Optional schema override.
 # If omitted, categorical columns are inferred from DataFrame dtypes.
 categorical_columns: null
 numerical_columns: null
 
 # Persistence controls from BaseAttacker
-sample_non_target_only: true
+sample_non_target_only: false
 store_poisoned_labels: false
 auto_save_result: true
 attack_artifact_root: artifacts/attacks

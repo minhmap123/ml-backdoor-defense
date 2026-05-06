@@ -142,6 +142,7 @@ def _prepare_model_train_cfg(
     model_cfg["d_out"] = num_classes
     model_cfg["num_numeric_features"] = num_features
     model_cfg["cat_cardinalities"] = []
+    model_cfg["seed"] = int(cfg.seed)
     train_cfg["seed"] = int(cfg.seed)
     train_cfg["target_label"] = int(cfg.attack.target_label)
     return model_cfg, train_cfg

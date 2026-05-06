@@ -42,8 +42,15 @@ class TabNet(BaseTabularModel):
         momentum: float = 0.02,
         lambda_sparse: float = 1e-3,
         mask_type: str = "sparsemax",
+        seed: Optional[int] = None,
         model_family: str = "tabnet",
     ) -> None:
+        self.seed = None if seed is None else int(seed)
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(self.seed)
+
         self.num_numeric_features = int(d_in if num_numeric_features is None else num_numeric_features)
         self.cat_cardinalities = [int(x) for x in (cat_cardinalities or [])]
         self.num_categorical_features = len(self.cat_cardinalities)
@@ -116,6 +123,7 @@ class TabNet(BaseTabularModel):
             "momentum": 0.02,
             "lambda_sparse": 1e-3,
             "mask_type": "sparsemax",
+            "seed": None,
         }
 
     def _extract_raw_input(self, parsed: ParsedModelInput) -> torch.Tensor:
@@ -202,6 +210,7 @@ class TabNet(BaseTabularModel):
                 "momentum": self.momentum,
                 "lambda_sparse": self.lambda_sparse,
                 "mask_type": self.mask_type,
+                "seed": self.seed,
                 "source_reference": "dreamquark-ai/tabnet",
                 "source_repository_url": "https://github.com/dreamquark-ai/tabnet",
                 "paper_url": "https://arxiv.org/abs/1908.07442",
