@@ -2,17 +2,13 @@ defaults:
   - data: iotid20
   - model: mlp
   - attack: badnets
-  - detection: spectral_signatures
-  - unlearning: none
+  - detection: neural_cleanse
   - train: default
   - _self_
 
 seed: 42
-experiment_name: backdoor_unlearning_benchmark
+experiment_name: backdoor_detection_benchmark
 
-# Staged pipeline controls.
-# The benchmark runs attack_train -> detection -> unlearning with explicit
-# artifact paths between stages.
 pipeline:
   stage: attack_train
   run_id: null
@@ -24,7 +20,7 @@ pipeline:
 # W&B logging configuration
 wandb:
   enabled: true
-  project: backdoor_unlearning_benchmark
+  project: backdoor_detection_benchmark
   entity: null  # Set to your W&B username or team name
   notes: null
   tags: []

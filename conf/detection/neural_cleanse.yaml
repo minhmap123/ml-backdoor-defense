@@ -26,8 +26,6 @@ mad_threshold: 2.0
 scan_priority_label: null
 allow_clean_support_bounds_fallback: false
 
-# Shared base settings
-topk: 0
 requires_model: true
 requires_detection_split: false
 requires_clean_support_split: true

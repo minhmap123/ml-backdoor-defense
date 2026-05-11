@@ -143,9 +143,17 @@ class NeuralCleanseDetector(BaseDetector):
             class_details=class_details,
             predicted_is_infected=predicted_is_infected,
             predicted_target_class=predicted_target_class,
+            candidate_target_class=smallest_mask_target_class,
+            candidate_target_score=float(anomaly_scores[smallest_mask_target_class]),
+            decision_score=float(anomaly_scores[smallest_mask_target_class]),
+            decision_threshold=float(self.mad_threshold),
+            decision_greater_is_infected=True,
             thresholds={
                 "threshold_source": "mad_lower_tail",
                 "mad_threshold": self.mad_threshold,
+                "decision_score": float(anomaly_scores[smallest_mask_target_class]),
+                "decision_threshold": float(self.mad_threshold),
+                "decision_greater_is_infected": True,
             },
             optimization_trace={
                 "regularization": self.regularization,

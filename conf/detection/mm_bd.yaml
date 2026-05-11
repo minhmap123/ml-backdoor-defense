@@ -15,8 +15,6 @@ early_stop_rel_tol: 1.0e-5
 significance_level: 0.05
 allow_split_bounds_fallback: false
 
-# Shared base settings
-topk: 0
 requires_model: true
 requires_detection_split: true
 requires_clean_support_split: false

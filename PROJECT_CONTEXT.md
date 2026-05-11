@@ -1,9 +1,9 @@
 # PROJECT_CONTEXT
 
 ## 1) Project Snapshot
-- Project: Backdoor patching using machine unlearning
+- Project: Backdoor detection for tabular IDS models
 - Domain: AI Security benchmark (tabular + IoT intrusion datasets)
-- Main objective: evaluate how effectively machine unlearning can remove backdoor behavior while preserving clean performance.
+- Main objective: evaluate whether detectors can identify a backdoored model, infer the target class, and report the class score relative to the decision threshold.
 - Research style: `research-prototype` with `reproduction-first` priority.
 - Target execution standard: conference-style empirical research with explicit reproducibility and deviation tracking.
 
@@ -15,7 +15,7 @@
 - Preferred model integration pattern:
   - upstream or official core implementation for architecture details,
   - local wrapper for repo contracts (`forward`, `forward_features`, `forward_logits`, metadata, save/load),
-  - local training/evaluation pipeline for fair comparison across attacks, detection, and unlearning.
+  - local training/evaluation pipeline for fair comparison across attacks and detection methods.
 - Avoid for baseline models unless there is a clear blocker:
   - full reimplementation from paper when official code exists,
   - importing an entire upstream training stack into this repo,
@@ -44,11 +44,11 @@
 - Original test accuracy
 - Attack clean accuracy
 - Attack success rate (ASR)
-- Detection precision / recall / F1 when poisoned indices are available
-- Suspect ranking quality (top-k recall) for localization experiments
-- Unlearned clean accuracy
-- Unlearned attack success rate
-- Runtime / unlearning time
+- Whether the detector predicts the model is infected
+- Candidate / predicted target class
+- Target-class detector score
+- Decision score, threshold, and margin to threshold
+- Runtime
 
 Notes:
 - Log metrics to W&B when available.
@@ -70,10 +70,6 @@ Notes:
   - Official source code: https://github.com/catback-tabular/catback.git
 
 ### 4.2 Backdoor Detection 
-- Spectral Signatures
-  - Paper: https://papers.nips.cc/paper_files/paper/2018/file/280cf18baf4311c92aa5a042336587d3-Paper.pdf
-  - Official source code: https://github.com/MadryLab/backdoor_data_poisoning
-
 - Neural Cleanse (NC)
   - Role: reverse-engineering detector using a small trigger-mask norm as anomaly evidence.
   - Paper: https://doi.org/10.1109/SP.2019.00031
@@ -106,18 +102,9 @@ Notes:
 - MLBD-CSO
   - Role: CSO-augmented variant of MLBD.
 
-### 4.3 Machine Unlearning / Backdoor Removal
-- Bad Teaching (incompetent teacher)
-  - Paper: https://arxiv.org/abs/2205.08096
-  - Code: https://github.com/vikram2000b/bad-teaching-unlearning
-- Anti-Backdoor Learning: Training Clean Models on Poisoned Data
-  - Paper: https://arxiv.org/abs/2110.11571
-  - Official code: https://github.com/bboylyg/ABL
-- Reconstructive Neuron Pruning for Backdoor Defense
-  - Paper: https://arxiv.org/abs/2305.14876
-  - Official code: https://github.com/bboylyg/RNP
-
-
+### 4.3 Out of Scope
+- Spectral Signatures and sample-localization metrics are removed from the active benchmark.
+- Machine-unlearning methods are removed from the active benchmark; archived source may remain under `src/unlearning` but is not wired into configs or scripts.
 
 ### 4.4 Candidate Model Families
 - MLP
@@ -152,7 +139,7 @@ Notes:
 - Conference-facing baseline policy:
   - architecture details should follow official code whenever available,
   - local code should wrap or minimally port upstream logic instead of inventing a fresh implementation,
-  - train/eval protocol should remain unified inside this repo so all baselines share the same attack/detection/unlearning pipeline,
+  - train/eval protocol should remain unified inside this repo so all baselines share the same attack/detection pipeline,
   - fairness matters more than stylistic code purity.
 - Minimum documentation expected before claiming a reproduced baseline is ready:
   - source links for paper and official code,

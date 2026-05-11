@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import average_precision_score, precision_recall_fscore_support, roc_auc_score
 
 from ..models.utils import parse_torch_batch, resolve_device as model_resolve_device, set_seed as model_set_seed, split_to_dataloader
 from .types import ArtifactIndex, DetectorContext, DetectorResult, _to_jsonable
@@ -93,16 +92,6 @@ def clamp_numeric_input(x: np.ndarray, lower: Optional[np.ndarray], upper: Optio
     return x
 
 
-def rank_desc(scores: np.ndarray) -> np.ndarray:
-    scores = np.asarray(scores, dtype=np.float32)
-    return np.argsort(scores)[::-1].astype(np.int64)
-
-
-def rank_asc(scores: np.ndarray) -> np.ndarray:
-    scores = np.asarray(scores, dtype=np.float32)
-    return np.argsort(scores).astype(np.int64)
-
-
 def derive_restart_seeds(seed: int, num_restarts: int) -> np.ndarray:
     base = int(seed)
     return np.asarray([base + rid for rid in range(int(num_restarts))], dtype=np.int64)
@@ -130,56 +119,6 @@ def normalize_detector_cfg(cfg: Any) -> Dict[str, Any]:
     if hasattr(cfg, "__dict__"):
         return {str(k): v for k, v in vars(cfg).items() if not str(k).startswith("_")}
     return {"value": cfg}
-
-
-def compute_sample_detection_metrics(
-    *,
-    sample_scores: Optional[np.ndarray],
-    sample_flags: Optional[np.ndarray],
-    poisoned_indices: Optional[np.ndarray],
-    num_candidates: int,
-) -> Dict[str, float]:
-    metrics: Dict[str, float] = {"detection/num_candidates": float(num_candidates)}
-    if poisoned_indices is None or num_candidates <= 0:
-        return metrics
-
-    poisoned_indices = np.asarray(poisoned_indices, dtype=np.int64)
-    y_true = np.zeros(int(num_candidates), dtype=np.int64)
-    valid_poisoned = poisoned_indices[(poisoned_indices >= 0) & (poisoned_indices < num_candidates)]
-    y_true[valid_poisoned] = 1
-
-    if sample_flags is not None:
-        y_pred = np.asarray(sample_flags, dtype=np.int64)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y_true,
-            y_pred,
-            average="binary",
-            zero_division=0,
-        )
-        metrics.update(
-            {
-                "detection/precision": float(precision),
-                "detection/recall": float(recall),
-                "detection/f1": float(f1),
-            }
-        )
-
-    if sample_scores is not None:
-        scores = np.asarray(sample_scores, dtype=np.float32)
-        if len(np.unique(y_true)) > 1:
-            metrics["detection/auroc"] = float(roc_auc_score(y_true, scores))
-            metrics["detection/average_precision"] = float(average_precision_score(y_true, scores))
-
-    return metrics
-
-
-def compute_topk_recall(sample_ranking: np.ndarray, poisoned_indices: np.ndarray, k: int) -> float:
-    ranking = np.asarray(sample_ranking, dtype=np.int64)
-    poisoned = set(np.asarray(poisoned_indices, dtype=np.int64).tolist())
-    if not poisoned or k <= 0:
-        return 0.0
-    topk = set(ranking[: int(k)].tolist())
-    return float(len(topk & poisoned) / max(len(poisoned), 1))
 
 
 def compute_class_detection_metrics(
@@ -215,6 +154,71 @@ def compute_class_detection_metrics(
     return metrics
 
 
+def enrich_class_decision_result(result: DetectorResult) -> None:
+    scores = None if result.class_scores is None else np.asarray(result.class_scores, dtype=np.float32).reshape(-1)
+    candidate = result.candidate_target_class
+    if candidate is None and result.predicted_target_class is not None:
+        candidate = int(result.predicted_target_class)
+    if candidate is None and scores is not None and scores.size > 0 and np.any(np.isfinite(scores)):
+        candidate = int(np.nanargmax(scores))
+
+    candidate_score = result.candidate_target_score
+    if candidate_score is None and candidate is not None and scores is not None:
+        if 0 <= int(candidate) < int(scores.shape[0]):
+            candidate_score = float(scores[int(candidate)])
+
+    thresholds = result.thresholds or {}
+    decision_score = result.decision_score
+    if decision_score is None:
+        value = thresholds.get("decision_score")
+        if value is not None:
+            decision_score = float(value)
+
+    decision_threshold = result.decision_threshold
+    if decision_threshold is None:
+        value = thresholds.get("decision_threshold")
+        if value is not None:
+            decision_threshold = float(value)
+
+    greater_is_infected = result.decision_greater_is_infected
+    if greater_is_infected is None and "decision_greater_is_infected" in thresholds:
+        greater_is_infected = bool(thresholds["decision_greater_is_infected"])
+
+    decision_margin = result.decision_margin
+    if (
+        decision_margin is None
+        and decision_score is not None
+        and decision_threshold is not None
+        and greater_is_infected is not None
+    ):
+        if bool(greater_is_infected):
+            decision_margin = float(decision_score - decision_threshold)
+        else:
+            decision_margin = float(decision_threshold - decision_score)
+
+    result.candidate_target_class = None if candidate is None else int(candidate)
+    result.candidate_target_score = candidate_score
+    result.decision_score = decision_score
+    result.decision_threshold = decision_threshold
+    result.decision_margin = decision_margin
+    result.decision_greater_is_infected = greater_is_infected
+
+    updates: Dict[str, Any] = {}
+    if result.candidate_target_class is not None:
+        updates["detection/candidate_target_class"] = float(result.candidate_target_class)
+    if candidate_score is not None:
+        updates["detection/candidate_target_score"] = float(candidate_score)
+    if decision_score is not None:
+        updates["detection/decision_score"] = float(decision_score)
+    if decision_threshold is not None:
+        updates["detection/decision_threshold"] = float(decision_threshold)
+    if decision_margin is not None:
+        updates["detection/decision_margin"] = float(decision_margin)
+    if greater_is_infected is not None:
+        updates["detection/decision_greater_is_infected"] = float(bool(greater_is_infected))
+    result.summary_metrics = merge_metric_dicts(result.summary_metrics, updates)
+
+
 def merge_metric_dicts(*metric_dicts: Dict[str, Any]) -> Dict[str, Any]:
     merged: Dict[str, Any] = {}
     for metric_dict in metric_dicts:
@@ -245,65 +249,6 @@ def write_summary(
     return _write_json(Path(output_dir) / "summary.json", payload)
 
 
-def write_sample_scores(output_dir: str, result: DetectorResult, context: DetectorContext) -> Optional[str]:
-    if result.sample_scores is None:
-        return None
-    scores = np.asarray(result.sample_scores)
-    ranking = None if result.sample_ranking is None else np.asarray(result.sample_ranking, dtype=np.int64)
-    flags = None if result.sample_flags is None else np.asarray(result.sample_flags, dtype=np.int64)
-    labels = None if result.sample_labels is None else np.asarray(result.sample_labels)
-    sample_indices = None if context.sample_indices is None else np.asarray(context.sample_indices, dtype=np.int64)
-
-    rank_positions = np.full(scores.shape[0], -1, dtype=np.int64)
-    if ranking is not None:
-        rank_positions[ranking] = np.arange(ranking.shape[0], dtype=np.int64)
-
-    payload = {
-        "sample_index": np.arange(scores.shape[0], dtype=np.int64),
-        "score": scores.astype(np.float32),
-        "rank_position": rank_positions,
-        "flag": None if flags is None else flags,
-    }
-    if sample_indices is not None:
-        payload["original_index"] = sample_indices
-    if labels is not None:
-        payload["label"] = labels
-
-    frame = pd.DataFrame(payload)
-    path = Path(output_dir) / "sample_scores.csv"
-    frame.to_csv(path, index=False)
-    return str(path)
-
-
-def write_raw_sample_scores(output_dir: str, result: DetectorResult, context: DetectorContext) -> Optional[str]:
-    if result.raw_sample_scores is None:
-        return None
-
-    raw_scores = np.asarray(result.raw_sample_scores)
-    decision_scores = None if result.sample_scores is None else np.asarray(result.sample_scores)
-    flags = None if result.sample_flags is None else np.asarray(result.sample_flags, dtype=np.int64)
-    labels = None if result.sample_labels is None else np.asarray(result.sample_labels)
-    sample_indices = None if context.sample_indices is None else np.asarray(context.sample_indices, dtype=np.int64)
-
-    payload = {
-        "sample_index": np.arange(raw_scores.shape[0], dtype=np.int64),
-        "raw_score": raw_scores.astype(np.float32),
-    }
-    if decision_scores is not None:
-        payload["decision_score"] = decision_scores.astype(np.float32)
-    if flags is not None:
-        payload["flag"] = flags
-    if sample_indices is not None:
-        payload["original_index"] = sample_indices
-    if labels is not None:
-        payload["label"] = labels
-
-    frame = pd.DataFrame(payload)
-    path = Path(output_dir) / "raw_sample_scores.csv"
-    frame.to_csv(path, index=False)
-    return str(path)
-
-
 def write_class_scores(output_dir: str, result: DetectorResult) -> Optional[str]:
     if result.class_scores is None:
         return None
@@ -329,34 +274,6 @@ def write_pair_scores(output_dir: str, result: DetectorResult) -> Optional[str]:
     frame = pd.DataFrame(result.pair_scores)
     path = Path(output_dir) / "pair_scores.csv"
     frame.to_csv(path, index=False)
-    return str(path)
-
-
-def resolve_suspect_indices(result: DetectorResult, context: DetectorContext) -> Optional[np.ndarray]:
-    local_indices: Optional[np.ndarray]
-    if result.suspect_indices is not None:
-        local_indices = np.asarray(result.suspect_indices, dtype=np.int64)
-    elif result.sample_flags is not None:
-        local_indices = np.flatnonzero(np.asarray(result.sample_flags, dtype=np.int64)).astype(np.int64)
-    else:
-        return None
-    if context.sample_indices is None:
-        return local_indices
-
-    sample_indices = np.asarray(context.sample_indices, dtype=np.int64)
-    if local_indices.size == 0:
-        return local_indices
-    if int(local_indices.max()) >= int(sample_indices.shape[0]):
-        raise ValueError("sample_flags reference indices outside DetectorContext.sample_indices.")
-    return sample_indices[local_indices].astype(np.int64, copy=False)
-
-
-def write_suspect_indices(output_dir: str, result: DetectorResult, context: DetectorContext) -> Optional[str]:
-    suspect_indices = resolve_suspect_indices(result, context)
-    if suspect_indices is None:
-        return None
-    path = Path(output_dir) / "suspect_indices.npy"
-    np.save(path, np.asarray(suspect_indices, dtype=np.int64))
     return str(path)
 
 
@@ -430,10 +347,6 @@ def save_detection_artifacts(
     out.mkdir(parents=True, exist_ok=True)
 
     index = result.artifacts
-    index.raw_scores_csv = write_sample_scores(str(out), result, context)
-    raw_sample_scores_csv = write_raw_sample_scores(str(out), result, context)
-    if raw_sample_scores_csv is not None:
-        index.extra_files["raw_sample_scores_csv"] = raw_sample_scores_csv
     index.class_scores_csv = write_class_scores(str(out), result)
     class_details_csv = write_class_details(str(out), result)
     if class_details_csv is not None:
@@ -441,7 +354,6 @@ def save_detection_artifacts(
     pair_scores_csv = write_pair_scores(str(out), result)
     if pair_scores_csv is not None:
         index.extra_files["pair_scores_csv"] = pair_scores_csv
-    index.suspect_indices_npy = write_suspect_indices(str(out), result, context)
     index.optimization_trace_json = write_optimization_trace(str(out), result)
     index.estimated_pattern_npy = write_estimated_pattern(str(out), result)
     estimated_trigger_npy = write_estimated_trigger(str(out), result)

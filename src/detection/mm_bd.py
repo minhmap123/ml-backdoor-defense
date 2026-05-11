@@ -10,7 +10,7 @@ from scipy.stats import gamma, median_abs_deviation
 from ..models.utils import split_to_numpy
 from .base import BaseDetector
 from .types import DetectorContext, DetectorResult
-from .utils import measure_runtime, rank_desc, resolve_device
+from .utils import measure_runtime, resolve_device
 
 
 class MMBDDetector(BaseDetector):
@@ -36,8 +36,8 @@ class MMBDDetector(BaseDetector):
       optimizing bounded continuous feature vectors instead of images.
       The optimization objective, per-class maximum-margin statistic, and
       gamma-based infected/target decision rule follow the official method.
-      The main deviation is the search domain: valid feature bounds are taken
-      from dataset preprocessing metadata rather than the image range [0, 1].
+      The main deviation is the search domain: valid feature bounds are the
+      model input bounds recorded by dataset preprocessing.
       This preserves the detector core while making it compatible with
       all-numeric IDS datasets.
     """
@@ -108,13 +108,20 @@ class MMBDDetector(BaseDetector):
                 f"detection/max_{self._objective_name()}": float(np.max(class_scores)),
                 "detection/max_anomaly_score": float(np.max(anomaly_scores)),
             },
-            sample_scores=None,
             class_scores=class_scores,
             predicted_is_infected=predicted_is_infected,
             predicted_target_class=predicted_target_class if predicted_is_infected else None,
+            candidate_target_class=predicted_target_class,
+            candidate_target_score=float(class_scores[predicted_target_class]),
+            decision_score=float(p_value),
+            decision_threshold=float(self.significance_level),
+            decision_greater_is_infected=False,
             thresholds={
                 "threshold_source": "gamma_pvalue",
                 "significance_level": self.significance_level,
+                "decision_score": float(p_value),
+                "decision_threshold": float(self.significance_level),
+                "decision_greater_is_infected": False,
             },
             deviation_note=None,
             optimization_trace={

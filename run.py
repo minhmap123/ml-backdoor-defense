@@ -15,9 +15,9 @@ from src.attacks import get_attack
 from src.attacks.base import AttackResult
 from src.data import IoTID20Dataset
 from src.detection import get_detection
-from src.detection.types import ArtifactIndex, DetectorContext, DetectorResult, FeatureMetadata
+from src.detection.trigger_report import build_model_input_feature_metadata, print_reversed_trigger_if_available
+from src.detection.types import DetectorContext
 from src.models import get_model, train_torch_model
-from src.unlearning import get_unlearning
 from src.utils.logging import (
     get_wandb_summary_profile,
     init_wandb,
@@ -185,18 +185,8 @@ def _save_datasets(stage_dir: Path, datasets: Dict[str, Any]) -> Dict[str, Any]:
     dataset_npz = data_dir / "datasets.npz"
     np.savez_compressed(dataset_npz, **arrays)
 
-    provenance_files: Dict[str, str] = {}
-    provenance = datasets.get("sample_provenance", {}) or {}
-    for split_name, frame in provenance.items():
-        if not isinstance(frame, pd.DataFrame):
-            continue
-        path = data_dir / f"{split_name}_sample_provenance.csv"
-        frame.to_csv(path, index=False)
-        provenance_files[str(split_name)] = str(path)
-
     return {
         "datasets_npz": str(dataset_npz),
-        "sample_provenance": provenance_files,
     }
 
 
@@ -253,26 +243,6 @@ def _load_model_from_attack_artifact(bundle: Dict[str, Any], device: str) -> tor
     return model
 
 
-def _build_feature_metadata(
-    datasets: Dict[str, Any], attack_result: AttackResult, metadata: Dict[str, Any] | None = None
-) -> FeatureMetadata:
-    
-    train_x = np.asarray(datasets["train"]["x"], dtype=np.float32)
-    feature_names = list(attack_result.poisoned_features.columns)
-    num_feats = int(train_x.shape[1])
-
-    lower = np.asarray(metadata["scaler_min"], dtype=np.float32)
-    upper = np.asarray(metadata["scaler_max"], dtype=np.float32)
-
-    return FeatureMetadata(
-        feature_names=feature_names,
-        feature_bounds_min=lower,
-        feature_bounds_max=upper,
-        num_numeric_features=num_feats,
-        num_categorical_features=0,
-    )
-
-
 def _attack_metadata_from_bundle(bundle: Dict[str, Any], train_metrics: Dict[str, Any] | None = None) -> Dict[str, Any]:
     train_metrics = train_metrics or bundle.get("model_metrics", {})
     attack_result = bundle["attack_result"]
@@ -312,88 +282,18 @@ def _build_detection_context(
         seed=int(cfg.seed),
         device=str(cfg.train.device),
         clean_support_split=datasets["val"],
-        poisoned_indices=poisoned_train_indices,
         attack_target_label=attack_target_label,
         attack_source_labels=attack_source_labels,
         attack_metadata=_attack_metadata_from_bundle(bundle),
         detector_cfg=OmegaConf.to_container(cfg.detection, resolve=True),
         model_metadata=model_metadata,
-        feature_metadata=_build_feature_metadata(datasets, attack_result, metadata),
+        feature_metadata=build_model_input_feature_metadata(datasets, attack_result, metadata),
         class_names=[str(x) for x in metadata["classes"]],
-        sample_indices=np.arange(int(datasets["train"]["x"].shape[0]), dtype=np.int64),
         true_is_infected=is_infected,
         true_target_class=attack_target_label if is_infected else None,
         evaluation_split=datasets["test"],
         run_dir=str(run_dir),
     )
-
-
-def _resolve_artifact_path(path_text: str | None, summary_path: Path) -> Path | None:
-    if not path_text:
-        return None
-    path = Path(str(path_text))
-    if path.exists():
-        return path
-    if not path.is_absolute():
-        candidate = summary_path.parent / path
-        if candidate.exists():
-            return candidate
-    return path
-
-
-def _load_detector_result_from_stage(detection_artifact_dir: str | Path) -> DetectorResult | None:
-    summary_path = Path(detection_artifact_dir) / "summary.json"
-    if not summary_path.exists():
-        return None
-    summary = _load_json_file(summary_path)
-    artifacts = summary.get("artifacts", {}) or {}
-    result = DetectorResult(
-        detector_name=str(summary.get("detector_name", "unknown")),
-        track_type=str(summary.get("track_type", "unknown")),
-        status=str(summary.get("status", "unknown")),
-        seed=int(summary.get("seed", 0)),
-        runtime_sec=float(summary.get("runtime_sec", 0.0)),
-        summary_metrics=dict(summary.get("summary_metrics", {}) or {}),
-        predicted_is_infected=summary.get("predicted_is_infected"),
-        predicted_target_class=summary.get("predicted_target_class"),
-        predicted_source_class=summary.get("predicted_source_class"),
-        thresholds=dict(summary.get("thresholds", {}) or {}),
-        deviation_note=summary.get("deviation_note"),
-        artifacts=ArtifactIndex(
-            summary_json=str(summary_path),
-            raw_scores_csv=artifacts.get("raw_scores_csv"),
-            class_scores_csv=artifacts.get("class_scores_csv"),
-            suspect_indices_npy=artifacts.get("suspect_indices_npy"),
-            optimization_trace_json=artifacts.get("optimization_trace_json"),
-            estimated_pattern_npy=artifacts.get("estimated_pattern_npy"),
-            plots=list(artifacts.get("plots", []) or []),
-            extra_files=dict(artifacts.get("extra_files", {}) or {}),
-        ),
-    )
-
-    suspect_path = _resolve_artifact_path(artifacts.get("suspect_indices_npy"), summary_path)
-    if suspect_path is not None and suspect_path.exists():
-        result.suspect_indices = np.load(suspect_path).astype(np.int64, copy=False)
-
-    scores_path = _resolve_artifact_path(artifacts.get("raw_scores_csv"), summary_path)
-    if scores_path is not None and scores_path.exists():
-        frame = pd.read_csv(scores_path)
-        if "score" in frame.columns:
-            result.sample_scores = frame["score"].to_numpy(dtype=np.float32)
-        if "flag" in frame.columns:
-            result.sample_flags = frame["flag"].to_numpy(dtype=np.int64)
-        if "rank_position" in frame.columns:
-            rank_positions = frame["rank_position"].to_numpy(dtype=np.int64)
-            valid = np.flatnonzero(rank_positions >= 0)
-            result.sample_ranking = valid[np.argsort(rank_positions[valid])].astype(np.int64, copy=False)
-
-    class_scores_path = _resolve_artifact_path(artifacts.get("class_scores_csv"), summary_path)
-    if class_scores_path is not None and class_scores_path.exists():
-        frame = pd.read_csv(class_scores_path)
-        if "score" in frame.columns:
-            result.class_scores = frame["score"].to_numpy(dtype=np.float32)
-
-    return result
 
 
 def _write_stage_summary(stage_dir: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -561,6 +461,8 @@ def run_detection_stage(cfg: DictConfig) -> Dict[str, Any]:
     print(f"Built detection: {detector.__class__.__name__}")
     context = _build_detection_context(cfg=cfg, bundle=bundle, model=model, run_dir=stage_dir)
     detection_result = detector.run(context)
+    if str(cfg.detection.name).lower() in ("neural_cleanse", "nc_cso"):
+        print_reversed_trigger_if_available(seed=int(cfg.seed), bundle=bundle, detection_result=detection_result)
     runtime_sec = float(time.perf_counter() - start)
 
     nested_summary = detection_result.artifacts.summary_json
@@ -568,8 +470,6 @@ def run_detection_stage(cfg: DictConfig) -> Dict[str, Any]:
         shutil.copyfile(nested_summary, stage_dir / "detector_summary.json")
 
     context_payload = context.to_jsonable()
-    context_payload.pop("poisoned_indices", None)
-    context_payload.pop("sample_indices", None)
 
     payload = {
         **detection_result.to_summary_dict(),
@@ -585,81 +485,6 @@ def run_detection_stage(cfg: DictConfig) -> Dict[str, Any]:
         "detector_summary_json": str(stage_dir / "detector_summary.json") if nested_summary else None,
         "context": context_payload,
         "resolved_cfg": OmegaConf.to_container(cfg.detection, resolve=True),
-    }
-    return _write_stage_summary(stage_dir, payload)
-
-
-def run_unlearning_stage(cfg: DictConfig) -> Dict[str, Any]:
-    stage_dir = _stage_dir(cfg, "unlearning")
-    run_id = str(cfg.pipeline.get("run_id") or stage_dir.name)
-    if _should_skip_stage(stage_dir, cfg):
-        print(f"[pipeline] skip_existing hit for unlearning: {stage_dir}")
-        return _load_json_file(stage_dir / "summary.json")
-
-    attack_train_dir = cfg.pipeline.get("attack_train_artifact_dir")
-    if not attack_train_dir:
-        raise ValueError("pipeline.attack_train_artifact_dir is required for pipeline.stage=unlearning")
-
-    start = time.perf_counter()
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    _write_stage_status(stage_dir, "running")
-    resolved_config_path = _save_resolved_config(stage_dir, cfg)
-
-    bundle = _load_attack_train_artifact(attack_train_dir)
-    model = _load_model_from_attack_artifact(bundle, str(cfg.train.device))
-    detection_result = None
-    detection_artifact_dir = cfg.pipeline.get("detection_artifact_dir")
-    if detection_artifact_dir:
-        detection_result = _load_detector_result_from_stage(detection_artifact_dir)
-
-    unlearner = get_unlearning(cfg.unlearning)
-    print(f"Built unlearning: {unlearner.__class__.__name__}")
-    datasets = bundle["datasets"]
-    metadata = bundle["metadata"]
-    attack_result = bundle["attack_result"]
-    train_sample_indices = np.arange(int(datasets["train"]["x"].shape[0]), dtype=np.int64)
-    attack_target_label = int(attack_result.target_label)
-    feature_metadata = _build_feature_metadata(datasets, attack_result, metadata)
-    attack_metadata = _attack_metadata_from_bundle(bundle)
-
-    unlearning_result = unlearner.run(
-        model=model,
-        datasets=datasets,
-        attack_result=attack_result,
-        detection_result=detection_result,
-        model_cfg=bundle["model_cfg"],
-        train_cfg=bundle["train_cfg"],
-        seed=int(cfg.seed),
-        device=str(cfg.train.device),
-        num_classes=int(len(metadata["classes"])),
-        class_names=[str(x) for x in metadata["classes"]],
-        target_label=attack_target_label,
-        train_sample_indices=train_sample_indices,
-        detection_sample_indices=train_sample_indices,
-        feature_metadata=feature_metadata,
-        attack_metadata=attack_metadata,
-        clean_support_split=datasets["val"],
-        run_dir=str(stage_dir),
-    )
-    runtime_sec = float(time.perf_counter() - start)
-
-    nested_summary = unlearning_result.artifacts.summary_json
-    if nested_summary:
-        shutil.copyfile(nested_summary, stage_dir / "unlearner_summary.json")
-
-    payload = {
-        **unlearning_result.to_summary_dict(),
-        "stage": "unlearning",
-        "run_id": run_id,
-        "status": unlearning_result.status,
-        "seed": int(cfg.seed),
-        "runtime_sec": float(unlearning_result.runtime_sec or runtime_sec),
-        "stage_runtime_sec": runtime_sec,
-        "artifact_dir": str(stage_dir),
-        "source_attack_train_artifact_dir": str(attack_train_dir),
-        "source_detection_artifact_dir": None if not detection_artifact_dir else str(detection_artifact_dir),
-        "resolved_config_yaml": resolved_config_path,
-        "unlearner_summary_json": str(stage_dir / "unlearner_summary.json") if nested_summary else None,
     }
     return _write_stage_summary(stage_dir, payload)
 
@@ -681,12 +506,11 @@ def main(cfg: DictConfig) -> None:
         "attack_train": ("attack_train", run_attack_train_stage),
         "attack-train": ("attack_train", run_attack_train_stage),
         "detection": ("detection", run_detection_stage),
-        "unlearning": ("unlearning", run_unlearning_stage),
     }
     resolved_stage = stage_runners.get(stage)
     if resolved_stage is None:
         raise ValueError(
-            f"Unknown pipeline.stage={stage!r}. Expected attack_train, detection, or unlearning."
+            f"Unknown pipeline.stage={stage!r}. Expected attack_train or detection."
         )
 
     stage_name, runner = resolved_stage

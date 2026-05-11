@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import Optional, Dict, Any, List
 
 import numpy as np
@@ -16,13 +15,6 @@ _SUMMARY_HISTORY_METRICS = (
     ("clean/val_f1_best", {}),
     ("backdoor/*", {}),
     ("tabnet/*", {}),
-)
-_COMPACT_SUMMARY_EXCLUDE_PATTERNS = (
-    re.compile(r".*/class_\d+_accuracy_(before|after)$"),
-    re.compile(r".*/class_\d+_support_(before|after)$"),
-    re.compile(r"backdoor/asr_source_\d+_(before|after)$"),
-    re.compile(r"backdoor/source_\d+_support_(before|after)$"),
-    re.compile(r".*/loss_(before|after)$"),
 )
 
 def get_logger(name: str) -> logging.Logger:
@@ -73,11 +65,9 @@ def _derive_wandb_tags(config: Dict[str, Any]) -> List[str]:
         active_components = {"attack", "model"}
     elif stage == "detection":
         active_components = {"attack", "model", "detection"}
-    elif stage == "unlearning":
-        active_components = {"attack", "model", "detection", "unlearning"}
     else:
         # Fallback: include all components for unknown stages.
-        active_components = {"attack", "model", "detection", "unlearning"}
+        active_components = {"attack", "model", "detection"}
 
     for key in active_components:
         component_name = _resolve_component_name(config, key)
@@ -108,19 +98,14 @@ def _configure_wandb_summary_metrics(config: Dict[str, Any]) -> None:
         wandb.define_metric(metric_name, summary="none", **extra_kwargs)
 
 
-def _is_noisy_compact_summary_key(key: str) -> bool:
-    return any(pattern.fullmatch(key) for pattern in _COMPACT_SUMMARY_EXCLUDE_PATTERNS)
-
-
 def filter_wandb_summary_metrics(summary_metrics: Dict[str, Any], *, prefix: str, profile: str) -> Dict[str, Any]:
+    _ = prefix
     profile_normalized = str(profile).strip().lower() or DEFAULT_WANDB_SUMMARY_PROFILE
     if profile_normalized == "full":
         return dict(summary_metrics)
 
     filtered: Dict[str, Any] = {}
     for key, value in summary_metrics.items():
-        if prefix == "unlearning" and _is_noisy_compact_summary_key(str(key)):
-            continue
         filtered[str(key)] = value
     return filtered
 
@@ -216,7 +201,7 @@ def init_wandb(config: Dict[str, Any]) -> bool:
         if not wandb_cfg.get("enabled", True):
             return False
 
-        project = wandb_cfg.get("project", "backdoor_unlearning_benchmark")
+        project = wandb_cfg.get("project", "backdoor_detection_benchmark")
         entity = wandb_cfg.get("entity", None)
         tags = _derive_wandb_tags(config)
 

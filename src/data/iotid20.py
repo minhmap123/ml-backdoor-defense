@@ -27,21 +27,6 @@ class IoTID20Dataset(NumericIDSDataset):
         counts = pd.Series(np.asarray(labels, dtype=np.int64)).value_counts().sort_index()
         return {int(k): int(v) for k, v in counts.items()}
 
-    @staticmethod
-    def _make_provenance(split: str, row_ids: np.ndarray, labels: pd.Series | np.ndarray) -> pd.DataFrame:
-        labels = np.asarray(labels, dtype=np.int64)
-        return pd.DataFrame(
-            {
-                "split": split,
-                "original_row_id": np.asarray(row_ids, dtype=np.int64),
-                "train_local_index" if split == "train" else "split_local_index": np.arange(len(labels), dtype=np.int64),
-                "source_label": labels,
-                "poison_flag": np.zeros(len(labels), dtype=np.int64),
-                "target_label": np.full(len(labels), -1, dtype=np.int64),
-                "final_label": labels,
-            }
-        )
-
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         threshold = 0.99999
         df = df.copy()
@@ -213,12 +198,6 @@ class IoTID20Dataset(NumericIDSDataset):
             attack_injection_stage = "preprocess_before_scaler"
 
         poisoned_labels = attack_result.get_poisoned_labels(prepared["y_train"].copy(deep=True))
-        train_provenance = self._make_provenance("train", prepared["row_train"], prepared["y_train"])
-        poison_flags = np.zeros(len(train_provenance), dtype=np.int64)
-        poison_flags[np.asarray(attack_result.poison_indices, dtype=np.int64)] = 1
-        train_provenance["poison_flag"] = poison_flags
-        train_provenance["target_label"] = np.where(poison_flags == 1, int(attack.target_label), -1)
-        train_provenance["final_label"] = poisoned_labels.to_numpy(dtype=np.int64, copy=False)
 
         datasets = {
             "train": {
@@ -248,14 +227,10 @@ class IoTID20Dataset(NumericIDSDataset):
                 "y": prepared["y_test"].to_numpy(dtype=np.int64, copy=False),
             },
             "test_clean_labels": prepared["y_test"].to_numpy(dtype=np.int64, copy=False),
-            "sample_provenance": {
-                "train": train_provenance,
-                "val": self._make_provenance("val", prepared["row_val"], prepared["y_val"]),
-                "test": self._make_provenance("test", prepared["row_test"], prepared["y_test"]),
-            },
         }
 
         minmax = output_scaler.named_steps["minmax_scaler"]
+        num_features = int(x_train_poisoned.shape[1])
         metadata = {
             "dataset": self.schema.name,
             "classes": prepared["encoder"].classes_.tolist(),
@@ -264,8 +239,12 @@ class IoTID20Dataset(NumericIDSDataset):
             "val_shape": list(x_val.shape),
             "test_shape": list(x_test.shape),
             "scaler": self.SCALER_TYPE,
+            "model_input_min": np.zeros(num_features, dtype=np.float32).tolist(),
+            "model_input_max": np.ones(num_features, dtype=np.float32).tolist(),
             "scaler_min": np.asarray(minmax.data_min_, dtype=np.float32).tolist(),
             "scaler_max": np.asarray(minmax.data_max_, dtype=np.float32).tolist(),
+            "minmax_data_min": np.asarray(minmax.data_min_, dtype=np.float32).tolist(),
+            "minmax_data_max": np.asarray(minmax.data_max_, dtype=np.float32).tolist(),
             "attack_injection_stage": attack_injection_stage,
             "attack_feature_space": (
                 "scaled_model_input" if attack_name == "catback" else "raw_before_preprocessing"
@@ -274,7 +253,6 @@ class IoTID20Dataset(NumericIDSDataset):
             "imbalance_protocol": "balanced_cross_entropy_from_train_labels",
             "dataset_random_state": int(self.schema.random_state),
             "class_counts": prepared["split_counts"],
-            "sample_provenance_saved": True,
         }
 
         return datasets, metadata, attack_result

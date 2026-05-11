@@ -100,9 +100,17 @@ class MMBDCSODetector(MMBDDetector):
             class_scores=class_scores,
             predicted_is_infected=predicted_is_infected,
             predicted_target_class=predicted_target_class if predicted_is_infected else None,
+            candidate_target_class=predicted_target_class,
+            candidate_target_score=float(class_scores[predicted_target_class]),
+            decision_score=float(p_value),
+            decision_threshold=float(self.significance_level),
+            decision_greater_is_infected=False,
             thresholds={
                 "threshold_source": "gamma_pvalue",
                 "significance_level": self.significance_level,
+                "decision_score": float(p_value),
+                "decision_threshold": float(self.significance_level),
+                "decision_greater_is_infected": False,
             },
             optimization_trace={
                 "num_candidates": self.num_candidates,

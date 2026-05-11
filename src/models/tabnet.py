@@ -211,11 +211,7 @@ class TabNet(BaseTabularModel):
                 "lambda_sparse": self.lambda_sparse,
                 "mask_type": self.mask_type,
                 "seed": self.seed,
-                "source_reference": "dreamquark-ai/tabnet",
-                "source_repository_url": "https://github.com/dreamquark-ai/tabnet",
-                "paper_url": "https://arxiv.org/abs/1908.07442",
                 "implementation_style": "official-package-wrapper",
-                "input_assumption": "raw_structured_tabular_input",
             }
         )
         return metadata

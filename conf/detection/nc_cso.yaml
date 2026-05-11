@@ -39,8 +39,6 @@ cso_mask_batch_size: 0
 cso_feature_batch_size: 512
 cso_epsilon: 1.0e-8
 
-# Shared base settings
-topk: 0
 requires_model: true
 requires_detection_split: false
 requires_clean_support_split: true

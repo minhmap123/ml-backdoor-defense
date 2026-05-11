@@ -6,7 +6,7 @@ Define one compact contract for all tabular models in this repo.
 Required properties:
 - multi-class by default,
 - logits out, no softmax in model,
-- supports attack / detection / unlearning,
+- supports attack training and model-level detection,
 - supports MLP, Tabular ResNet, TabNet, FT-Transformer, SAINT,
 - small enough for agent consumption.
 
@@ -61,7 +61,7 @@ Family guidance:
 - FT-Transformer: transformer output before final head
 - SAINT: contextualized token embedding / pooled sequence output
 
-Detectors like Spectral Signatures need this path directly.
+CSO-style detectors use this path for internal feature-space masks.
 
 ## Save / Load Contract
 Use run folders, explicit files, and lightweight metadata.
@@ -115,11 +115,14 @@ For the triggered view:
 - optionally log `backdoor/accuracy` if you build a full triggered test set.
 
 ### Detection metrics
-If poisoned indices are known, also log:
-- `detection/precision`
-- `detection/recall`
-- `detection/f1`
-- optional `top-k recall`
+Model-level detectors should log:
+- `detection/is_infected_accuracy`
+- `detection/target_class_accuracy`
+- `detection/candidate_target_class`
+- `detection/candidate_target_score`
+- `detection/decision_score`
+- `detection/decision_threshold`
+- `detection/decision_margin`
 
 ## Utilities
 `src/models/utils.py` should stay architecture-agnostic.

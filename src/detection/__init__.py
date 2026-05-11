@@ -5,7 +5,6 @@ from .mm_bd import MMBDDetector
 from .mmbd_cso import MMBDCSODetector
 from .nc_cso import NCCSODetector
 from .neural_cleanse import NeuralCleanseDetector
-from .spectral_signatures import SpectralSignaturesDetector
 from .types import ArtifactIndex, DetectorContext, DetectorResult, FeatureMetadata
 
 
@@ -38,7 +37,6 @@ DETECTION_REGISTRY = {
     "mmbd_cso": MMBDCSODetector,
     "neural_cleanse": NeuralCleanseDetector,
     "neural_cleanse_cso": NCCSODetector,
-    "spectral_signatures": SpectralSignaturesDetector,
 }
 
 
@@ -64,6 +62,5 @@ __all__ = [
     "MMBDCSODetector",
     "NeuralCleanseDetector",
     "NoOpDetector",
-    "SpectralSignaturesDetector",
     "get_detection",
 ]

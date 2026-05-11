@@ -59,7 +59,6 @@ class DetectorContext:
     seed: int
     device: Any = "cpu"
     clean_support_split: Optional[Any] = None
-    poisoned_indices: Optional[np.ndarray] = None
     attack_target_label: Optional[int] = None
     attack_source_labels: Optional[List[int]] = None
     class_names: Optional[List[str]] = None
@@ -68,7 +67,6 @@ class DetectorContext:
     attack_metadata: Optional[Dict[str, Any]] = None
     detector_cfg: Optional[Dict[str, Any]] = None
     run_dir: Optional[str] = None
-    sample_indices: Optional[np.ndarray] = None
     true_is_infected: Optional[bool] = None
     true_target_class: Optional[int] = None
     true_source_class: Optional[int] = None
@@ -81,7 +79,6 @@ class DetectorContext:
             "num_classes": int(self.num_classes),
             "seed": int(self.seed),
             "device": str(self.device),
-            "poisoned_indices": _to_jsonable(self.poisoned_indices),
             "attack_target_label": self.attack_target_label,
             "attack_source_labels": _to_jsonable(self.attack_source_labels),
             "class_names": self.class_names,
@@ -90,7 +87,6 @@ class DetectorContext:
             "attack_metadata": _to_jsonable(self.attack_metadata),
             "detector_cfg": _to_jsonable(self.detector_cfg),
             "run_dir": self.run_dir,
-            "sample_indices": _to_jsonable(self.sample_indices),
             "true_is_infected": self.true_is_infected,
             "true_target_class": self.true_target_class,
             "true_source_class": self.true_source_class,
@@ -100,9 +96,7 @@ class DetectorContext:
 @dataclass
 class ArtifactIndex:
     summary_json: Optional[str] = None
-    raw_scores_csv: Optional[str] = None
     class_scores_csv: Optional[str] = None
-    suspect_indices_npy: Optional[str] = None
     optimization_trace_json: Optional[str] = None
     estimated_pattern_npy: Optional[str] = None
     plots: List[str] = field(default_factory=list)
@@ -111,9 +105,7 @@ class ArtifactIndex:
     def to_jsonable(self) -> Dict[str, Any]:
         return {
             "summary_json": self.summary_json,
-            "raw_scores_csv": self.raw_scores_csv,
             "class_scores_csv": self.class_scores_csv,
-            "suspect_indices_npy": self.suspect_indices_npy,
             "optimization_trace_json": self.optimization_trace_json,
             "estimated_pattern_npy": self.estimated_pattern_npy,
             "plots": list(self.plots),
@@ -129,18 +121,18 @@ class DetectorResult:
     seed: int
     runtime_sec: float
     summary_metrics: Dict[str, Any] = field(default_factory=dict)
-    raw_sample_scores: Optional[np.ndarray] = None
-    sample_scores: Optional[np.ndarray] = None
-    sample_ranking: Optional[np.ndarray] = None
-    sample_flags: Optional[np.ndarray] = None
-    sample_labels: Optional[np.ndarray] = None
-    suspect_indices: Optional[np.ndarray] = None
     class_scores: Optional[np.ndarray] = None
     class_details: Optional[pd.DataFrame] = None
     pair_scores: Optional[pd.DataFrame] = None
     predicted_is_infected: Optional[bool] = None
     predicted_target_class: Optional[int] = None
     predicted_source_class: Optional[int] = None
+    candidate_target_class: Optional[int] = None
+    candidate_target_score: Optional[float] = None
+    decision_score: Optional[float] = None
+    decision_threshold: Optional[float] = None
+    decision_margin: Optional[float] = None
+    decision_greater_is_infected: Optional[bool] = None
     thresholds: Dict[str, Any] = field(default_factory=dict)
     artifacts: ArtifactIndex = field(default_factory=ArtifactIndex)
     deviation_note: Optional[str] = None
@@ -161,10 +153,15 @@ class DetectorResult:
             "seed": int(self.seed),
             "runtime_sec": float(self.runtime_sec),
             "summary_metrics": _to_jsonable(self.summary_metrics),
-            "suspect_indices_count": 0 if self.suspect_indices is None else int(len(self.suspect_indices)),
             "predicted_is_infected": self.predicted_is_infected,
             "predicted_target_class": self.predicted_target_class,
             "predicted_source_class": self.predicted_source_class,
+            "candidate_target_class": self.candidate_target_class,
+            "candidate_target_score": self.candidate_target_score,
+            "decision_score": self.decision_score,
+            "decision_threshold": self.decision_threshold,
+            "decision_margin": self.decision_margin,
+            "decision_greater_is_infected": self.decision_greater_is_infected,
             "thresholds": _to_jsonable(self.thresholds),
             "artifacts": self.artifacts.to_jsonable(),
             "deviation_note": self.deviation_note,
@@ -183,16 +180,3 @@ class DetectorResult:
     def load_summary(cls, summary_path: str) -> Dict[str, Any]:
         with Path(summary_path).open("r", encoding="utf-8") as handle:
             return json.load(handle)
-
-    @classmethod
-    def load_suspect_indices(cls, summary_path: str) -> np.ndarray:
-        summary = cls.load_summary(summary_path)
-        artifact_path = summary.get("artifacts", {}).get("suspect_indices_npy")
-        if not artifact_path:
-            return np.empty((0,), dtype=np.int64)
-
-        path = Path(artifact_path)
-        if not path.is_absolute():
-            summary_dir = Path(summary_path).resolve().parent
-            path = (summary_dir / path).resolve() if not path.exists() else path
-        return np.load(path).astype(np.int64, copy=False)
