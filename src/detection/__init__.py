@@ -5,6 +5,8 @@ from .mm_bd import MMBDDetector
 from .mmbd_cso import MMBDCSODetector
 from .nc_cso import NCCSODetector
 from .neural_cleanse import NeuralCleanseDetector
+from .pt_red import PTREDDetector
+from .pt_red_cso import PTREDCSODetector
 from .types import ArtifactIndex, DetectorContext, DetectorResult, FeatureMetadata
 
 
@@ -37,6 +39,8 @@ DETECTION_REGISTRY = {
     "mmbd_cso": MMBDCSODetector,
     "neural_cleanse": NeuralCleanseDetector,
     "neural_cleanse_cso": NCCSODetector,
+    "pt_red": PTREDDetector,
+    "pt_red_cso": PTREDCSODetector,
 }
 
 
@@ -62,5 +66,7 @@ __all__ = [
     "MMBDCSODetector",
     "NeuralCleanseDetector",
     "NoOpDetector",
+    "PTREDDetector",
+    "PTREDCSODetector",
     "get_detection",
 ]

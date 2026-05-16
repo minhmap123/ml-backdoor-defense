@@ -1,0 +1,27 @@
+name: pt_red_cso
+seed: ${seed}
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+
+# PT-RED-CSO follows Eq. (9) of the CSO paper directly (no public official CSO
+# code). PT-RED primitive matches the IEEE TNNLS 2022 paper that CSO cites:
+# https://arxiv.org/abs/1908.10498
+# CSO paper: https://arxiv.org/abs/2512.08129
+# CSO p.13: lambda=0.1 for PT-RED-CSO; remaining settings = PT-RED defaults.
+
+# Inherited PT-RED settings (must match conf/detection/pt_red.yaml for fairness).
+num_steps: 1000
+lr: 1.0e-2
+lr_noise_std: 0.1
+pi_misclassification: 0.8
+num_clean_support_per_class: 10
+significance_level: 0.05
+
+# CSO penalty (Eq. 9, lambda from CSO Appendix A.1.2).
+lambda_cso: 0.1
+cso_mask_opt_steps: 200
+cso_mask_opt_lr: 0.1
+
+requires_model: true
+requires_detection_split: false
+requires_clean_support_split: true

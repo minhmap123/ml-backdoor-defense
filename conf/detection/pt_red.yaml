@@ -1,0 +1,25 @@
+name: pt_red
+seed: ${seed}
+auto_save_result: true
+detection_artifact_root: artifacts/detection
+
+# PT-RED follows the IEEE TNNLS 2022 paper that the CSO benchmark cites:
+# Xiang, Miller, Kesidis, "Detection of backdoors in trained classifiers
+# without access to the training set", IEEE TNNLS, 2022.
+# arXiv: https://arxiv.org/abs/1908.10498
+# CSO paper: https://arxiv.org/abs/2512.08129
+#
+# Defaults: pi=0.8 (TNNLS p.29), L2 reciprocal stat (TNNLS p.23 fn 12),
+# significance_level=0.05 (TNNLS p.29), N_img=10 per class (CSO Appx A.1.2),
+# CE loss (CSO Eq. 9 footnote 1).
+
+num_steps: 1000
+lr: 1.0e-2
+lr_noise_std: 0.1
+pi_misclassification: 0.8
+num_clean_support_per_class: 10
+significance_level: 0.05
+
+requires_model: true
+requires_detection_split: false
+requires_clean_support_split: true
