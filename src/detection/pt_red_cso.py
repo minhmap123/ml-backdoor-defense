@@ -33,7 +33,9 @@ class PTREDCSODetector(PTREDDetector):
     The PT-RED reverse-engineering primitive (per-(s,t) optimisation, zero
     init, cross-entropy surrogate with stop on rho>=pi=0.8) and the L2
     reciprocal + Gamma robust-null + order p-value decision rule are
-    inherited from the local PT-RED baseline. Only the loss adds
+    inherited from the local PT-RED baseline. Target class inference uses
+    per-class mean aggregation (same as PT-RED) to robustly identify which
+    class is the attack target. Only the loss adds
     `lambda * mean_x C_t(x + p)` with C_t evaluated in feature space via
     `model.forward_features()`.
     """

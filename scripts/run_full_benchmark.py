@@ -32,14 +32,53 @@ DATASET_CONFIGS: Dict[str, Dict[str, Any]] = {
         "tabdoor_trigger_size": 3,
         "tabdoor_poison_rate": 0.02,
         "catback_poison_rate": 0.02,
-    }
+    },
+    "cic_ids2018": {
+        "data_config": "cic_ids2018",
+        "train_epochs": 100,
+        "train_batch_size": 4096,
+        "wandb_project": "cic_ids2018_full_detection_benchmark",
+        "target_label": 0,           # Benign — attacker misclassifies attacks as benign
+        "trigger_features": "1,15,30",  # Flow Duration, Flow IAT Mean, Pkt Len Mean (0-based)
+        "badnets_trigger_value": 3.0,
+        "badnets_poison_rate": 0.05,
+        "tabdoor_trigger_size": 3,
+        "tabdoor_poison_rate": 0.02,
+        "catback_poison_rate": 0.02,
+    },
+    "cic_ids2017": {
+        "data_config": "cic_ids2017",
+        "train_epochs": 100,
+        "train_batch_size": 4096,
+        "wandb_project": "cic_ids2017_full_detection_benchmark",
+        "target_label": 0,           # Benign — attacker misclassifies attacks as benign
+        "trigger_features": "0,13,33",  # Flow Duration, Flow IAT Mean, Pkt Len Mean (post-FS)
+        "badnets_trigger_value": 3.0,
+        "badnets_poison_rate": 0.05,
+        "tabdoor_trigger_size": 3,
+        "tabdoor_poison_rate": 0.02,
+        "catback_poison_rate": 0.02,
+    },
+    "cic_iot_2023": {
+        "data_config": "cic_iot_2023",
+        "train_epochs": 100,
+        "train_batch_size": 4096,
+        "wandb_project": "cic_iot_2023_full_detection_benchmark",
+        "target_label": 0,           # Benign — attacker misclassifies attacks as benign
+        "trigger_features": "3,30,28",  # Rate, IAT, AVG packet size (post-FS 33 features)
+        "badnets_trigger_value": 3.0,
+        "badnets_poison_rate": 0.05,
+        "tabdoor_trigger_size": 3,
+        "tabdoor_poison_rate": 0.02,
+        "catback_poison_rate": 0.02,
+    },
 }
 
 DEFAULT_DATASET = "iotid20"
 
 ATTACKS = ["catback", "tabdoor", "badnets"]
 MODELS = ["mlp", "resnet", "tabnet", "ft_transformer", "saint"]
-DETECTIONS = ["mlbd", "mm_bd", "neural_cleanse", "mlbd_cso", "mmbd_cso", "nc_cso"]
+DETECTIONS = ["mlbd", "mm_bd", "neural_cleanse", "pt_red", "mlbd_cso", "mmbd_cso", "nc_cso", "pt_red_cso"]
 
 
 def run_stage(
@@ -72,7 +111,7 @@ def run_stage(
         f"pipeline.run_id={run_id}",
         f"pipeline.artifact_dir={artifact_dir}",
         f"pipeline.skip_existing={'true' if SKIP_EXISTING else 'false'}",
-        f"wandb.enabled=false",
+        f"wandb.enabled=true",
         f"wandb.project={dataset_cfg['wandb_project']}",
         f"wandb.summary_profile=compact",
         f"hydra.run.dir={artifact_dir.parent.parent / 'hydra' / stage / run_id}",
@@ -101,11 +140,13 @@ def run_stage(
             for line in proc.stdout:
                 sys.stdout.write(line)
                 handle.write(line)
-        return proc.wait() == 0
+        ok = proc.wait() == 0
+    else:
+        with log_file.open("w", encoding="utf-8") as handle:
+            completed = subprocess.run(cmd, stdout=handle, stderr=subprocess.STDOUT, text=True, check=False)
+        ok = completed.returncode == 0
 
-    with log_file.open("w", encoding="utf-8") as handle:
-        completed = subprocess.run(cmd, stdout=handle, stderr=subprocess.STDOUT, text=True, check=False)
-    return completed.returncode == 0
+    return ok
 
 
 def main() -> int:

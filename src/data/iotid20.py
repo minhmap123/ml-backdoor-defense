@@ -229,27 +229,19 @@ class IoTID20Dataset(NumericIDSDataset):
             "test_clean_labels": prepared["y_test"].to_numpy(dtype=np.int64, copy=False),
         }
 
-        minmax = output_scaler.named_steps["minmax_scaler"]
         num_features = int(x_train_poisoned.shape[1])
         metadata = {
             "dataset": self.schema.name,
             "classes": prepared["encoder"].classes_.tolist(),
-            "label_mapping": {name: int(i) for i, name in enumerate(prepared["encoder"].classes_)},
             "train_shape": list(x_train_poisoned.shape),
             "val_shape": list(x_val.shape),
             "test_shape": list(x_test.shape),
-            "scaler": self.SCALER_TYPE,
             "model_input_min": np.zeros(num_features, dtype=np.float32).tolist(),
             "model_input_max": np.ones(num_features, dtype=np.float32).tolist(),
-            "scaler_min": np.asarray(minmax.data_min_, dtype=np.float32).tolist(),
-            "scaler_max": np.asarray(minmax.data_max_, dtype=np.float32).tolist(),
-            "minmax_data_min": np.asarray(minmax.data_min_, dtype=np.float32).tolist(),
-            "minmax_data_max": np.asarray(minmax.data_max_, dtype=np.float32).tolist(),
             "attack_injection_stage": attack_injection_stage,
             "attack_feature_space": (
                 "scaled_model_input" if attack_name == "catback" else "raw_before_preprocessing"
             ),
-            "catback_numeric_only_official_mode": bool(attack_name == "catback"),
             "imbalance_protocol": "balanced_cross_entropy_from_train_labels",
             "dataset_random_state": int(self.schema.random_state),
             "class_counts": prepared["split_counts"],

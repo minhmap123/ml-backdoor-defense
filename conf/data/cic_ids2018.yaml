@@ -1,0 +1,3 @@
+name: cic_ids2018
+data_root: data/1_processed/CSE-CIC-IDS2018
+label_column: Label_encoded

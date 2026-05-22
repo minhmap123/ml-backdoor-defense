@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.attacks import get_attack
 from src.attacks.base import AttackResult
-from src.data import IoTID20Dataset
+from src.data import CICIDS2017Dataset, CICIoT2023Dataset, CSECICIDS2018Dataset, IoTID20Dataset
 from src.detection import get_detection
 from src.detection.trigger_report import build_model_input_feature_metadata, print_reversed_trigger_if_available
 from src.detection.types import DetectorContext
@@ -128,6 +128,29 @@ def _should_skip_stage(stage_dir: Path, cfg: DictConfig) -> bool:
 def _make_iotid20_dataset(seed: int) -> IoTID20Dataset:
     schema = replace(IoTID20Dataset.schema, random_state=int(seed))
     return IoTID20Dataset(schema=schema)
+
+
+def _make_cic_ids2018_dataset(seed: int) -> CSECICIDS2018Dataset:
+    schema = replace(CSECICIDS2018Dataset.schema, random_state=int(seed))
+    return CSECICIDS2018Dataset(schema=schema)
+
+
+def _make_cic_ids2017_dataset(seed: int) -> CICIDS2017Dataset:
+    schema = replace(CICIDS2017Dataset.schema, random_state=int(seed))
+    return CICIDS2017Dataset(schema=schema)
+
+
+def _make_cic_iot_2023_dataset(seed: int) -> CICIoT2023Dataset:
+    schema = replace(CICIoT2023Dataset.schema, random_state=int(seed))
+    return CICIoT2023Dataset(schema=schema)
+
+
+_DATASET_FACTORIES = {
+    "iotid20":     _make_iotid20_dataset,
+    "cic_ids2018": _make_cic_ids2018_dataset,
+    "cic_ids2017": _make_cic_ids2017_dataset,
+    "cic_iot_2023": _make_cic_iot_2023_dataset,
+}
 
 
 def _prepare_model_train_cfg(
@@ -345,7 +368,7 @@ def run_attack_train_stage(cfg: DictConfig) -> Dict[str, Any]:
 
     attack = get_attack(attack_cfg)
     print(f"Built attack: {attack.__class__.__name__}")
-    dataset = _make_iotid20_dataset(int(cfg.seed))
+    dataset = _DATASET_FACTORIES[str(cfg.data.name).lower()](int(cfg.seed))
     prepared = None
     catback_surrogate = None
     if str(cfg.attack.name).lower() == "catback":
@@ -498,8 +521,8 @@ def main(cfg: DictConfig) -> None:
     summary_profile = get_wandb_summary_profile(cfg_dict)
     init_wandb(cfg_dict)
 
-    if str(cfg.data.name).lower() != "iotid20":
-        raise ValueError("Only data.name=iotid20 is currently wired in run.py")
+    if str(cfg.data.name).lower() not in _DATASET_FACTORIES:
+        raise ValueError(f"Unknown dataset '{cfg.data.name}'. Available: {list(_DATASET_FACTORIES)}")
 
     stage = str(cfg.get("pipeline", {}).get("stage", "attack_train")).strip().lower()
     stage_runners = {

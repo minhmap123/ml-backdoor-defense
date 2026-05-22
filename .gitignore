@@ -6,6 +6,8 @@ data/0_raw/
 data/1_processed/
 data/artifacts/
 data/notebooks/
+!data/notebooks/IoTID20.ipynb
+!data/notebooks/*_final.ipynb
 # Preserve folder structure
 !data/.gitkeep
 !data/0_raw/.gitkeep
@@ -39,6 +41,7 @@ tmp/
 .codex/
 session_memory/
 third_party/
+analysis/
 
 # ============================================================================
 # Python
@@ -76,6 +79,7 @@ ENV/
 # ============================================================================
 # IDE & Editors
 # ============================================================================
+.ipynb_checkpoints/
 .vscode/
 .idea/
 *.swp

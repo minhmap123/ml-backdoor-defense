@@ -151,8 +151,7 @@ Notes:
 ## 6) Quick Resume Checklist
 On a fresh session:
 1. Read `AGENTS.md` then this file.
-2. Read `EXPECTATIONS.md` to align implementation and reporting expectations.
-3. Open `session_memory/SESSION_LOG.md` (latest entry first).
-4. Open `session_memory/DECISIONS.md` and unresolved items.
-5. Pick the top pending item in `session_memory/NEXT_STEPS.md`.
-6. Run a minimal smoke command before long experiments.
+2. Open `session_memory/SESSION_LOG.md` (latest entry first).
+3. Open `session_memory/DECISIONS.md` and unresolved items.
+4. Pick the top pending item in `session_memory/NEXT_STEPS.md`.
+5. Run a minimal smoke command before long experiments.

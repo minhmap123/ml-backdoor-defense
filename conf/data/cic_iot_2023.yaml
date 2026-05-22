@@ -1,0 +1,3 @@
+name: cic_iot_2023
+data_root: data/1_processed/CIC-IoT2023
+label_column: Label_encoded
