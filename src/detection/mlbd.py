@@ -5,7 +5,9 @@ from typing import Any, Dict
 import numpy as np
 import torch
 
+from .cso import CSOHelper
 from .mm_bd import MMBDDetector
+from .types import DetectorContext
 
 
 class MLBDDetector(MMBDDetector):
@@ -20,11 +22,6 @@ class MLBDDetector(MMBDDetector):
     Local research assumptions:
     - No standalone official MLBD code is used here; the detector is implemented
       from the paper definition by reusing the audited local MM-BD scaffold.
-    - The active repo path is numeric-only IDS, so optimization happens in a
-      bounded continuous feature space.
-    - The core MLBD statistic is preserved: per class, optimize synthetic
-      inputs to maximize the putative target-class logit, then apply the same
-      gamma-tail decision rule used by MM-BD over the resulting class scores.
     """
 
     def __init__(self, cfg: Any) -> None:
@@ -37,14 +34,7 @@ class MLBDDetector(MMBDDetector):
         del num_classes
         return logits[:, int(target_class)]
 
-    def _build_class_stat(
-        self,
-        *,
-        target_class: int,
-        steps_run: int,
-        best_score: float,
-        final_scores: np.ndarray,
-    ) -> Dict[str, Any]:
+    def _build_class_stat(self, *, target_class, steps_run, best_score, final_scores) -> Dict[str, Any]:
         return {
             "target_class": int(target_class),
             "steps_run": int(steps_run),
@@ -52,3 +42,30 @@ class MLBDDetector(MMBDDetector):
             "mean_logit": float(np.mean(final_scores)),
             "std_logit": float(np.std(final_scores)),
         }
+
+
+class MLBDCSODetector(MLBDDetector):
+    """
+    MLBD-CSO reuses the MLBD optimization scaffold and adds the CSO penalty,
+    following Eq. (7) of the CSO paper.
+
+    Research references:
+    - MM-BD paper: https://arxiv.org/abs/2205.06900
+    - CSO paper: https://openreview.net/forum?id=c6IRL2mdDR
+      Eq. (7): MLBD-CSO objective. Default lambda=400.0 from Appendix A.1.2.
+
+    Local research assumptions:
+    - No public official CSO code was found during implementation, so this
+      detector follows Eq. (7) directly.
+    - `clean_support_split` is required to estimate class-specific intrinsic
+      feature masks and reference subspaces (same as MMBD-CSO).
+    """
+
+    def __init__(self, cfg: Any) -> None:
+        super().__init__(cfg)
+        self.lambda_cso = float(getattr(cfg, "lambda_cso", 400.0))
+        self.requires_clean_support_split = True
+        self.cso_helper = CSOHelper(cfg)
+
+    def _prepare_cso(self, model, context: DetectorContext, device):
+        return self.cso_helper.fit(model=model, context=context, device=device)

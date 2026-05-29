@@ -10,6 +10,7 @@ from scipy.stats import gamma
 
 from ..models.utils import split_to_numpy
 from .base import BaseDetector
+from .cso import CSOHelper
 from .types import DetectorContext, DetectorResult
 from .utils import measure_runtime, resolve_device
 
@@ -107,6 +108,7 @@ class PTREDDetector(BaseDetector):
 
         lower_t, upper_t = self._resolve_bounds(context, x_clean, device)
 
+        cso_state = self._prepare_cso(model, context, device)
         rng = np.random.default_rng(int(context.seed))
         num_classes = int(context.num_classes)
         feature_dim = int(x_clean.shape[1])
@@ -120,7 +122,7 @@ class PTREDDetector(BaseDetector):
             for t in range(num_classes):
                 if t == s:
                     continue
-                best_pert, rho, steps_run = self._reverse_engineer_pair(
+                best_pert, rho, steps_run, last_cso = self._reverse_engineer_pair(
                     x_source=x_source,
                     target_class=int(t),
                     model=model,
@@ -129,23 +131,31 @@ class PTREDDetector(BaseDetector):
                     feature_dim=feature_dim,
                     device=device,
                     rng=rng,
+                    cso_state=cso_state,
                 )
                 norm = float(np.linalg.norm(best_pert))
-                pair_records.append({
+                record: Dict[str, Any] = {
                     "source_class": int(s),
                     "target_class": int(t),
                     "perturbation_l2": norm,
                     "reciprocal_stat": 1.0 / max(norm, np.finfo(np.float64).tiny),
                     "final_misclassification_rho": float(rho),
                     "steps_run": int(steps_run),
-                })
+                }
+                if np.isfinite(last_cso):
+                    record["final_cso_penalty"] = float(last_cso)
+                pair_records.append(record)
                 best_perturbations[(int(s), int(t))] = best_pert
 
-        return self._build_result(
+        result = self._build_result(
             context=context,
             pair_records=pair_records,
             best_perturbations=best_perturbations,
         )
+        if cso_state is not None:
+            result.optimization_trace["lambda_cso"] = float(self.lambda_cso)
+            result.feature_layer_name = "forward_features"
+        return result
 
     def _presample_source_indices(
         self,
@@ -181,6 +191,9 @@ class PTREDDetector(BaseDetector):
             torch.as_tensor(upper, dtype=torch.float32, device=device),
         )
 
+    def _prepare_cso(self, model: torch.nn.Module, context: DetectorContext, device: torch.device):
+        return None
+
     # ------------------------------------------------------------------
     # Algorithm 1 of TNNLS 2022 (paper-faithful per (s, t) reverse-eng)
     # ------------------------------------------------------------------
@@ -195,7 +208,8 @@ class PTREDDetector(BaseDetector):
         feature_dim: int,
         device: torch.device,
         rng: np.random.Generator,
-    ) -> Tuple[np.ndarray, float, int]:
+        cso_state=None,
+    ) -> Tuple[np.ndarray, float, int, float]:
         x_source_t = torch.as_tensor(x_source, dtype=torch.float32, device=device)
         labels_t = torch.full((x_source_t.shape[0],), int(target_class), dtype=torch.long, device=device)
 
@@ -204,6 +218,7 @@ class PTREDDetector(BaseDetector):
 
         rho = 0.0
         steps_run = 0
+        last_cso = float("nan")
         for step_idx in range(self.num_steps):
             steps_run = step_idx + 1
             lr_noisy = float(self.lr * (1.0 + rng.normal(0.0, self.lr_noise_std)))
@@ -214,7 +229,17 @@ class PTREDDetector(BaseDetector):
 
             x_with_bd = torch.clamp(x_source_t + pert.unsqueeze(0), min=lower_t, max=upper_t)
             # CSO Eq. 9 footnote 1: L is the cross entropy loss.
-            loss = F.cross_entropy(model(x_with_bd), labels_t)
+            loss_ce = F.cross_entropy(model(x_with_bd), labels_t)
+            if cso_state is not None:
+                loss_cso = self.cso_helper.penalty(
+                    state=cso_state,
+                    candidate_features=model.forward_features(x_with_bd),
+                    target_class=int(target_class),
+                ).mean()
+                loss = loss_ce + self.lambda_cso * loss_cso
+                last_cso = float(loss_cso.item())
+            else:
+                loss = loss_ce
             loss.backward()
             optimizer.step()
             pert = pert.detach()
@@ -225,7 +250,7 @@ class PTREDDetector(BaseDetector):
             if rho >= self.pi_misclassification:
                 break
 
-        return pert.detach().cpu().numpy().astype(np.float32), rho, steps_run
+        return pert.detach().cpu().numpy().astype(np.float32), rho, steps_run, last_cso
 
     # ------------------------------------------------------------------
     # Robust Gamma null + order p-value (TNNLS 2022 Eq. 4 + Sec 3.1.3)
@@ -319,3 +344,30 @@ class PTREDDetector(BaseDetector):
             return float(p_value), {"shape": float(shape), "loc": float(loc), "scale": float(scale)}, "ok"
         except Exception:
             return 1.0, {"shape": float("nan"), "loc": float("nan"), "scale": float("nan")}, "gamma_fit_failed"
+
+
+class PTREDCSODetector(PTREDDetector):
+    """
+    Paper-faithful PT-RED-CSO detector for numeric IDS inputs.
+
+    Research references:
+    - PT-RED base: Xiang, Miller, Kesidis, "Detection of backdoors in trained
+      classifiers without access to the training set", IEEE TNNLS, 2022.
+      arXiv: https://arxiv.org/abs/1908.10498
+    - CSO paper: https://arxiv.org/abs/2512.08129
+      PT-RED-CSO is Eq. (9) with lambda=0.1 (Appendix A.1.2).
+    - CSO p.13: "PT-RED-CSO. We set lambda=0.1 in Eq. 9. All remaining
+      settings are kept consistent with PT-RED (Xiang et al. (2022))."
+    """
+
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.lambda_cso = float(getattr(cfg, "lambda_cso", 0.1))
+        self.cso_helper = CSOHelper(cfg)
+
+    def _validate_context(self, context: DetectorContext) -> None:
+        super()._validate_context(context)
+        assert hasattr(context.model, "forward_features"), "PT-RED-CSO requires model.forward_features(...)."
+
+    def _prepare_cso(self, model, context: DetectorContext, device):
+        return self.cso_helper.fit(model=model, context=context, device=device)

@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from ..models.utils import split_to_numpy
 from .base import BaseDetector
+from .cso import CSOHelper
 from .types import DetectorContext, DetectorResult
 from .utils import measure_runtime, resolve_device
 
@@ -69,7 +70,12 @@ class NeuralCleanseDetector(BaseDetector):
 
     def _validate_context(self, context: DetectorContext) -> None:
         super()._validate_context(context)
-        self._assert_numeric_only_context(context)
+        if context.feature_metadata is not None:
+            assert int(context.feature_metadata.num_categorical_features) == 0
+        for split_name in ("clean_support_split", "detection_split"):
+            split = getattr(context, split_name)
+            if isinstance(split, dict):
+                assert split.get("x_cat") is None
         assert self.regularization in {"l1", "l2"}, f"Unsupported regularization: {self.regularization}"
 
     def _run_impl(self, context: DetectorContext) -> DetectorResult:
@@ -89,6 +95,7 @@ class NeuralCleanseDetector(BaseDetector):
         lower_t = torch.as_tensor(lower, dtype=torch.float32, device=device)
         upper_t = torch.as_tensor(upper, dtype=torch.float32, device=device)
 
+        cso_state = self._prepare_cso(model, context, device)
         target_order = self._resolve_target_order(context)
         anomaly_scores = np.zeros(int(context.num_classes), dtype=np.float32)
         mask_norms = np.full(int(context.num_classes), np.nan, dtype=np.float32)
@@ -104,6 +111,7 @@ class NeuralCleanseDetector(BaseDetector):
                 lower_t=lower_t,
                 upper_t=upper_t,
                 device=device,
+                cso_state=cso_state,
             )
             mask_norm = float(np.sum(np.abs(mask_best)))
             mask_norms[int(target_class)] = mask_norm
@@ -155,38 +163,24 @@ class NeuralCleanseDetector(BaseDetector):
                 "decision_threshold": float(self.mad_threshold),
                 "decision_greater_is_infected": True,
             },
-            optimization_trace={
-                "regularization": self.regularization,
-                "init_cost": self.init_cost,
-                "num_steps": self.num_steps,
-                "num_samples_per_step": self.num_samples_per_step,
-                "batch_size": self.batch_size,
-                "lr": self.lr,
-                "attack_succ_threshold": self.attack_succ_threshold,
-                "patience": self.patience,
-                "cost_multiplier": self.cost_multiplier,
-                "reset_cost_to_zero": self.reset_cost_to_zero,
-                "early_stop": self.early_stop,
-                "early_stop_threshold": self.early_stop_threshold,
-                "early_stop_patience": self.early_stop_patience,
-                "lower_bounds_source": self._resolve_bounds_source(context),
-                "allow_clean_support_bounds_fallback": self.allow_clean_support_bounds_fallback,
-                "scan_priority_label": self.scan_priority_label,
-                "target_order": target_order,
-                "mask_norms": mask_norms.astype(np.float32).tolist(),
-                "anomaly_scores": anomaly_scores.astype(np.float32).tolist(),
-                "flagged_labels": [int(x) for x in flagged_labels],
-                "anomaly_index": float(anomaly_index),
-                "smallest_mask_target_class": int(smallest_mask_target_class),
-                "predicted_target_class_if_flagged": predicted_target_class,
-                "per_target_stats": per_target_stats,
-            },
+            optimization_trace=self._build_optimization_trace(
+                context=context,
+                target_order=target_order,
+                mask_norms=mask_norms,
+                anomaly_scores=anomaly_scores,
+                flagged_labels=flagged_labels,
+                anomaly_index=anomaly_index,
+                smallest_mask_target_class=smallest_mask_target_class,
+                predicted_target_class=predicted_target_class,
+                per_target_stats=per_target_stats,
+                cso_state=cso_state,
+            ),
             estimated_trigger=artifact_pattern,
             estimated_mask=artifact_mask,
+            feature_layer_name="forward_features" if cso_state is not None else None,
         )
 
     def _extract_clean_support(self, context: DetectorContext) -> Tuple[np.ndarray, np.ndarray]:
-        self._assert_numeric_only_context(context)
         x, y = split_to_numpy(context.clean_support_split)
         x = np.asarray(x, dtype=np.float32)
         y = np.asarray(y, dtype=np.int64)
@@ -225,24 +219,53 @@ class NeuralCleanseDetector(BaseDetector):
                 return "feature_metadata"
         return "clean_support_minmax_fallback"
 
-    def _assert_numeric_only_context(self, context: DetectorContext) -> None:
-        if context.feature_metadata is not None:
-            assert int(context.feature_metadata.num_categorical_features) == 0, (
-                "Neural Cleanse local IDS path expects numeric-only features."
-            )
-        if context.model_metadata is not None and "num_categorical_features" in context.model_metadata:
-            assert int(context.model_metadata["num_categorical_features"]) == 0, (
-                "Neural Cleanse local IDS path expects numeric-only models."
-            )
-        if hasattr(context.model, "num_categorical_features"):
-            assert int(getattr(context.model, "num_categorical_features")) == 0, (
-                "Neural Cleanse local IDS path expects numeric-only model instances."
-            )
-        for split_name in ("clean_support_split", "detection_split"):
-            split = getattr(context, split_name)
-            if isinstance(split, dict):
-                x_cat = split.get("x_cat")
-                assert x_cat is None, f"Neural Cleanse local IDS path does not accept categorical {split_name}."
+    def _build_optimization_trace(
+        self,
+        *,
+        context: DetectorContext,
+        target_order: List[int],
+        mask_norms: np.ndarray,
+        anomaly_scores: np.ndarray,
+        flagged_labels: List[int],
+        anomaly_index: float,
+        smallest_mask_target_class: int,
+        predicted_target_class,
+        per_target_stats: List[Dict[str, Any]],
+        cso_state,
+    ) -> Dict[str, Any]:
+        trace: Dict[str, Any] = {
+            "regularization": self.regularization,
+            "init_cost": self.init_cost,
+            "num_steps": self.num_steps,
+            "num_samples_per_step": self.num_samples_per_step,
+            "batch_size": self.batch_size,
+            "lr": self.lr,
+            "attack_succ_threshold": self.attack_succ_threshold,
+            "patience": self.patience,
+            "cost_multiplier": self.cost_multiplier,
+            "reset_cost_to_zero": self.reset_cost_to_zero,
+            "early_stop": self.early_stop,
+            "early_stop_threshold": self.early_stop_threshold,
+            "early_stop_patience": self.early_stop_patience,
+            "lower_bounds_source": self._resolve_bounds_source(context),
+            "allow_clean_support_bounds_fallback": self.allow_clean_support_bounds_fallback,
+            "scan_priority_label": self.scan_priority_label,
+            "target_order": target_order,
+            "mask_norms": mask_norms.astype(np.float32).tolist(),
+            "anomaly_scores": anomaly_scores.astype(np.float32).tolist(),
+            "flagged_labels": [int(x) for x in flagged_labels],
+            "anomaly_index": float(anomaly_index),
+            "smallest_mask_target_class": int(smallest_mask_target_class),
+            "predicted_target_class_if_flagged": predicted_target_class,
+            "per_target_stats": per_target_stats,
+        }
+        if cso_state is not None:
+            trace["lambda_cso"] = float(self.lambda_cso)
+            trace["cso"] = self.cso_helper.state_to_trace(cso_state)
+        return trace
+
+    def _prepare_cso(self, model: torch.nn.Module, context: DetectorContext, device: torch.device):
+        return None
 
     def _optimize_one_target(
         self,
@@ -253,6 +276,7 @@ class NeuralCleanseDetector(BaseDetector):
         lower_t: torch.Tensor,
         upper_t: torch.Tensor,
         device: torch.device,
+        cso_state=None,
     ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
         d_in = int(x_clean.shape[1])
         # The official sample script uses `MINI_BATCH = NB_SAMPLE // BATCH_SIZE`.
@@ -277,6 +301,7 @@ class NeuralCleanseDetector(BaseDetector):
         mask_best = None
         pattern_best = None
         reg_best = float("inf")
+        best_cso_penalty = float("nan")
         logs: List[Dict[str, Any]] = []
         cost_set_counter = 0
         cost_up_counter = 0
@@ -291,6 +316,7 @@ class NeuralCleanseDetector(BaseDetector):
         for step in range(self.num_steps):
             loss_ce_list = []
             loss_reg_list = []
+            loss_cso_list: List[float] = []
             loss_list = []
             loss_acc_list = []
 
@@ -305,7 +331,17 @@ class NeuralCleanseDetector(BaseDetector):
                 logits = model(x_adv)
                 loss_ce = F.cross_entropy(logits, y_target)
                 loss_reg = self._mask_regularization(mask)
-                loss = loss_ce + loss_reg * cost
+                if cso_state is not None:
+                    candidate_features = model.forward_features(x_adv)
+                    loss_cso = self.cso_helper.penalty(
+                        state=cso_state,
+                        candidate_features=candidate_features,
+                        target_class=int(target_class),
+                    ).mean()
+                    loss = loss_ce + loss_reg * cost + self.lambda_cso * loss_cso
+                    loss_cso_list.append(float(loss_cso.item()))
+                else:
+                    loss = loss_ce + loss_reg * cost
                 loss.backward()
                 optimizer.step()
 
@@ -320,6 +356,7 @@ class NeuralCleanseDetector(BaseDetector):
 
             avg_loss_ce = float(np.mean(loss_ce_list))
             avg_loss_reg = float(np.mean(loss_reg_list))
+            avg_loss_cso = float(np.mean(loss_cso_list)) if loss_cso_list else float("nan")
             avg_loss = float(np.mean(loss_list))
             avg_loss_acc = float(np.mean(loss_acc_list))
 
@@ -332,18 +369,21 @@ class NeuralCleanseDetector(BaseDetector):
                         upper_t=upper_t,
                     )
                 reg_best = avg_loss_reg
+                if loss_cso_list:
+                    best_cso_penalty = avg_loss_cso
 
-            logs.append(
-                {
-                    "step": int(step),
-                    "avg_loss_ce": avg_loss_ce,
-                    "avg_loss_reg": avg_loss_reg,
-                    "avg_loss": avg_loss,
-                    "avg_loss_acc": avg_loss_acc,
-                    "reg_best": float(reg_best),
-                    "cost": float(cost),
-                }
-            )
+            log_entry: Dict[str, Any] = {
+                "step": int(step),
+                "avg_loss_ce": avg_loss_ce,
+                "avg_loss_reg": avg_loss_reg,
+                "avg_loss": avg_loss,
+                "avg_loss_acc": avg_loss_acc,
+                "reg_best": float(reg_best),
+                "cost": float(cost),
+            }
+            if cso_state is not None:
+                log_entry["avg_loss_cso"] = avg_loss_cso
+            logs.append(log_entry)
 
             if self.early_stop:
                 if reg_best < float("inf"):
@@ -391,15 +431,21 @@ class NeuralCleanseDetector(BaseDetector):
                     upper_t=upper_t,
                 )
 
-        target_stats = {
+        if cso_state is not None and not np.isfinite(best_cso_penalty):
+            best_cso_penalty = float(logs[-1]["avg_loss_cso"]) if logs else 0.0
+
+        target_stats: Dict[str, Any] = {
             "target_class": int(target_class),
             "best_mask_norm": float(np.sum(np.abs(mask_best))),
             "best_attack_success": float(max((entry["avg_loss_acc"] for entry in logs), default=0.0)),
             "steps_run": int(len(logs)),
             "final_cost": float(cost),
             "reg_best": float(reg_best),
-            "logs": logs,
         }
+        if cso_state is not None:
+            target_stats["lambda_cso"] = float(self.lambda_cso)
+            target_stats["best_candidate_cso_penalty"] = float(best_cso_penalty)
+        target_stats["logs"] = logs
         return pattern_best, mask_best, target_stats
 
     def _decode_parameters(
@@ -505,3 +551,40 @@ class NeuralCleanseDetector(BaseDetector):
                 ),
             }
         )
+
+
+class NCCSODetector(NeuralCleanseDetector):
+    """
+    Paper-first NC-CSO detector for numeric IDS inputs.
+
+    Research references:
+    - Neural Cleanse paper: https://doi.org/10.1109/SP.2019.00031
+    - Neural Cleanse official repo: https://github.com/bolunwang/backdoor
+    - CSO paper: https://openreview.net/forum?id=c6IRL2mdDR
+
+    Local research assumptions:
+    - No public official CSO code was found during implementation, so this
+      detector follows the published NC-CSO objective in Eq. (8) directly.
+    - NC-CSO reuses the local numeric IDS Neural Cleanse optimization and adds
+      the CSO penalty in feature space using `forward_features()`.
+
+    Suggested deviation note for reporting:
+    - We implement NC-CSO directly from the published CSO objective because no
+      public official code was available. The detector inherits the local
+      numeric IDS adaptation of Neural Cleanse and adds a CSO term penalizing
+      positive cosine similarity between reverse-engineered candidate features
+      and the target class intrinsic feature subspace estimated from clean support.
+    """
+
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.lambda_cso = float(getattr(cfg, "lambda_cso", 0.01))
+        self.cso_helper = CSOHelper(cfg)
+
+    def _validate_context(self, context: DetectorContext) -> None:
+        super()._validate_context(context)
+        assert hasattr(context.model, "forward_features"), "NC-CSO requires model.forward_features(...)."
+        assert hasattr(context.model, "forward_logits"), "NC-CSO requires model.forward_logits(...)."
+
+    def _prepare_cso(self, model, context: DetectorContext, device):
+        return self.cso_helper.fit(model=model, context=context, device=device)

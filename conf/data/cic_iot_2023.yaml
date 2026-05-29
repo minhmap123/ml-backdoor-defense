@@ -1,3 +1,56 @@
 name: cic_iot_2023
-data_root: data/1_processed/CIC-IoT2023
-label_column: Label_encoded
+
+# ============================================================================
+# Trigger design -- selection criteria (apply to every dataset):
+#   1. Controllability -- the attacker must be able to set the feature value
+#      while crafting traffic. Prefer Fwd-direction features, packet counts,
+#      and TCP flags. Avoid Bwd-* and Down/Up_Ratio (they depend on server
+#      responses, which the attacker cannot control).
+#   2. Plausibility -- the value sits near the P95 of the benign distribution:
+#      rare (~5% of benign) but still inside the natural range, so the model
+#      can learn the trigger pattern and an anomaly detector will not flag it
+#      first.
+#   3. Reproducibility -- the attacker can craft a flow such that the IDS
+#      computes the EXACT value via Scapy / raw sockets. No server compromise
+#      or special environmental conditions required.
+# ============================================================================
+
+benchmark:
+  train_epochs: 100
+  train_batch_size: 4096
+  wandb_project: cic_iot_2023_full_detection_benchmark
+  target_label: 0                  # encoder.classes_[0] = "Benign" -- the attacker
+                                   # wants to misclassify attack flows as Benign.
+
+  # NOTE: CIC-IoT-2023 differs from the other three datasets. Features are
+  # FRACTIONAL aggregates over a packet window of size Number=10 (e.g.,
+  # psh_flag_number = #PSH_packets / 10), not per-flow counts/binaries.
+  # => trigger_value lives in [0, 1].
+  #
+  # Pattern: "in a 10-packet window, ~50% have FIN, ~50% have SYN, ~50% have
+  # PSH" -- value=0.5 applied to 3 flag-fraction features.
+  # Indices are positions after feature-selection (33 features total).
+  #   [4] fin_flag_number      -- 5/10 of the packets the attacker sends have FIN
+  #   [5] syn_flag_number      -- 5/10 of the packets have SYN
+  #   [7] psh_flag_number      -- 5/10 of the packets have PSH
+  # Benign stats:
+  #   - fin_flag_number: P95=0.1, max=0.9   -> value=0.5 is rare (>P95)
+  #   - syn_flag_number: P95=0.1, max=1.0   -> value=0.5 is rare (>P95)
+  #   - psh_flag_number: P95=0.5, max=1.0   -> value=0.5 sits at the P95 edge
+  # => The joint pattern is very rare in benign, so the trigger is
+  # distinguishable.
+  # Reproducibility: Scapy -> within 10 attacker-sent packets, set FIN/SYN/PSH
+  # on 5 packets each (overlaps are allowed).
+  # Caveat: FIN+SYN co-occurrence is a TCP protocol anomaly. This dataset only
+  # extracts features (no stateful TCP), so the trigger is not pre-filtered
+  # before reaching the model.
+  badnets:
+    trigger_features: [4, 5, 7]
+    trigger_value: 0.5             # 50% of packets carry the flag -> coherent "half-set" trigger
+    poison_rate: 0.03
+  tabdoor:
+    trigger_features: null         # null -> auto-select via TabDoor feature importance
+    trigger_size: 3
+    poison_rate: 0.03
+  catback:
+    poison_rate: 0.02

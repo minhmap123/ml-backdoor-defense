@@ -1,6 +1,6 @@
 name: tabdoor
 dataset_name: ${data.name}
-poison_rate: 0.02
+poison_rate: 0.03
 target_label: 3
 seed: ${seed}
 
@@ -13,9 +13,7 @@ trigger_size: 3
 # Provide either trigger_features or feature_ranking.
 # trigger_features takes precedence if both are present.
 # If both are null, TabDoor falls back to compute_ensemble_feature_importance.
-# IoTID20 official-run default for raw-feature injection (before preprocessing):
-# [34, 15, 1] = Bwd_Pkts/s, Flow_Pkts/s, Flow_Duration.
-trigger_features: [34, 15, 1]
+trigger_features: null
 feature_ranking: null
 fallback_reruns: 1
 fallback_device_name: cpu

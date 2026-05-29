@@ -1,3 +1,46 @@
 name: cic_ids2017
-data_root: data/1_processed/CIC-IDS2017
-label_column: Label_encoded
+
+# ============================================================================
+# Trigger design -- selection criteria (apply to every dataset):
+#   1. Controllability -- the attacker must be able to set the feature value
+#      while crafting traffic. Prefer Fwd-direction features, packet counts,
+#      and TCP flags. Avoid Bwd-* and Down/Up_Ratio (they depend on server
+#      responses, which the attacker cannot control).
+#   2. Plausibility -- the value sits near the P95 of the benign distribution:
+#      rare (~5% of benign) but still inside the natural range, so the model
+#      can learn the trigger pattern and an anomaly detector will not flag it
+#      first.
+#   3. Reproducibility -- the attacker can craft a flow such that the IDS
+#      computes the EXACT value via Scapy / raw sockets. No server compromise
+#      or special environmental conditions required.
+# ============================================================================
+
+benchmark:
+  train_epochs: 100
+  train_batch_size: 4096
+  wandb_project: cic_ids2017_full_detection_benchmark
+  target_label: 0                  # encoder.classes_[0] = "Benign" -- the attacker
+                                   # wants to misclassify attack flows as Benign.
+
+  # Pattern: "a single fwd TCP packet with both PSH and URG bits set".
+  # Indices are positions after feature-selection (52 features total).
+  #   [25] Fwd PSH Flags       -- attacker sets the PSH bit on a forward packet
+  #   [26] Fwd URG Flags       -- attacker sets the URG bit on a forward packet (rare in benign)
+  #   [40] URG Flag Count      -- total URG count (correlates with Fwd URG=1)
+  # Benign stats (all three features are binary 0/1):
+  #   - Fwd PSH Flags : P95=1 (~5-10% benign have it) -- common-ish
+  #   - Fwd URG Flags : P95=0, max=1                  -- very rare (<5%)
+  #   - URG Flag Count: P95=1                         -- correlates with Fwd URG
+  # The joint pattern (all 3 = 1 simultaneously) is rare in benign, so the
+  # trigger is distinguishable enough for the model to learn it.
+  # Reproducibility: Scapy -> TCP(flags="PU") on one fwd packet. Trivial.
+  badnets:
+    trigger_features: [25, 26, 40]
+    trigger_value: 1.0             # binary flag = 1 -- the only valid value besides 0
+    poison_rate: 0.03
+  tabdoor:
+    trigger_features: null         # null -> auto-select via TabDoor feature importance
+    trigger_size: 3
+    poison_rate: 0.03
+  catback:
+    poison_rate: 0.02

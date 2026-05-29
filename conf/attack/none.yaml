@@ -1,0 +1,8 @@
+name: none
+dataset_name: ${data.name}
+poison_rate: 0.0           # no poisoning
+target_label: 0            # placeholder -- no samples have their label flipped
+seed: ${seed}
+auto_save_result: true
+attack_artifact_root: artifacts/attacks
+store_poisoned_labels: false

@@ -1,12 +1,8 @@
 from .base import BaseDetector
-from .mlbd import MLBDDetector
-from .mlbd_cso import MLBDCSODetector
-from .mm_bd import MMBDDetector
-from .mmbd_cso import MMBDCSODetector
-from .nc_cso import NCCSODetector
-from .neural_cleanse import NeuralCleanseDetector
-from .pt_red import PTREDDetector
-from .pt_red_cso import PTREDCSODetector
+from .mlbd import MLBDDetector, MLBDCSODetector
+from .mm_bd import MMBDDetector, MMBDCSODetector
+from .neural_cleanse import NeuralCleanseDetector, NCCSODetector
+from .pt_red import PTREDDetector, PTREDCSODetector
 from .types import ArtifactIndex, DetectorContext, DetectorResult, FeatureMetadata
 
 

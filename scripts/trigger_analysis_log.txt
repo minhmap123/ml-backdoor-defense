@@ -1,0 +1,26 @@
+
+=== iotid20 ===
+  classes: ['DoS', 'MITM ARP Spoofing', 'Mirai', 'Normal', 'Scan']
+  feature count: 67
+  total samples: 322,961, benign: 27,018
+  wrote /home/jupyter-iec2023se02/ml-backdoor-defense/scripts/trigger_analysis/iotid20.json in 6.4s
+
+=== cic_ids2017 ===
+  classes: [np.str_('Benign'), np.str_('Bot'), np.str_('BruteForce'), np.str_('DDoS'), np.str_('DoS'), np.str_('PortScan'), np.str_('WebAttack')]
+  feature count: 52
+  total samples: 597,986, benign: 300,000
+  wrote /home/jupyter-iec2023se02/ml-backdoor-defense/scripts/trigger_analysis/cic_ids2017.json in 44.0s
+
+=== cic_ids2018 ===
+  classes: [np.str_('Benign'), np.str_('Bot'), np.str_('DDOS attack-HOIC'), np.str_('DDOS attack-LOIC-UDP'), np.str_('DDoS attacks-LOIC-HTTP'), np.str_('DoS attacks-GoldenEye'), np.str_('DoS attacks-Hulk'), np.str_('DoS attacks-Slowloris'), np.str_('SSH-Bruteforce')]
+  feature count: 49
+  total samples: 1,797,735, benign: 950,000
+  wrote /home/jupyter-iec2023se02/ml-backdoor-defense/scripts/trigger_analysis/cic_ids2018.json in 270.5s
+
+=== cic_iot_2023 ===
+  classes: [np.str_('Benign'), np.str_('DDoS'), np.str_('DoS'), np.str_('Mirai'), np.str_('Recon'), np.str_('Spoofing')]
+  feature count: 33
+  total samples: 6,014,865, benign: 735,585
+  wrote /home/jupyter-iec2023se02/ml-backdoor-defense/scripts/trigger_analysis/cic_iot_2023.json in 363.1s
+
+Done.

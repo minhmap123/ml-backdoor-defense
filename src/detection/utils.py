@@ -21,12 +21,6 @@ def resolve_device(device: Optional[str]) -> torch.device:
     return model_resolve_device(device)
 
 
-def ensure_run_dir(path: str | Path) -> str:
-    out = Path(path)
-    out.mkdir(parents=True, exist_ok=True)
-    return str(out)
-
-
 def measure_runtime(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Tuple[Any, float]:
     start = perf_counter()
     result = fn(*args, **kwargs)
@@ -81,31 +75,6 @@ def extract_model_logits(
     logits = np.concatenate(logits_list, axis=0) if logits_list else np.empty((0, 0), dtype=np.float32)
     labels = np.concatenate(labels_list, axis=0) if labels_list else np.empty((0,), dtype=np.int64)
     return logits, labels
-
-
-def clamp_numeric_input(x: np.ndarray, lower: Optional[np.ndarray], upper: Optional[np.ndarray]) -> np.ndarray:
-    x = np.asarray(x, dtype=np.float32)
-    if lower is not None:
-        x = np.maximum(x, np.asarray(lower, dtype=np.float32))
-    if upper is not None:
-        x = np.minimum(x, np.asarray(upper, dtype=np.float32))
-    return x
-
-
-def derive_restart_seeds(seed: int, num_restarts: int) -> np.ndarray:
-    base = int(seed)
-    return np.asarray([base + rid for rid in range(int(num_restarts))], dtype=np.int64)
-
-
-def count_split_samples(split: Any) -> int:
-    if isinstance(split, dict):
-        if "y" in split:
-            return int(len(split["y"]))
-        if "x" in split:
-            return int(len(split["x"]))
-    if isinstance(split, (tuple, list)) and split:
-        return int(len(split[0]))
-    raise ValueError(f"Unsupported split type: {type(split)}")
 
 
 def normalize_detector_cfg(cfg: Any) -> Dict[str, Any]:

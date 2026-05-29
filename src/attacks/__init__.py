@@ -1,11 +1,13 @@
 from .badnets import BadNets
 from .catback import CatBackAttacker
+from .none import NoneAttack
 from .tabdoor import TabDoor
 from .base import AttackResult
 
 ATTACK_REGISTRY = {
     "badnets": BadNets,
     "catback": CatBackAttacker,
+    "none": NoneAttack,
     "tabdoor": TabDoor,
 }
 

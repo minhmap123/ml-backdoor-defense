@@ -42,9 +42,8 @@ class CSOHelper:
     """
 
     def __init__(self, cfg: Any) -> None:
-        self.num_clean_support_per_class = getattr(cfg, "num_clean_support_per_class", 10)
-        if self.num_clean_support_per_class is not None:
-            self.num_clean_support_per_class = int(self.num_clean_support_per_class)
+        _n = getattr(cfg, "num_clean_support_per_class", 10)
+        self.num_clean_support_per_class = int(_n) if _n is not None else None
         self.min_clean_support_per_class = int(getattr(cfg, "min_clean_support_per_class", 10))
         self.mask_opt_steps = int(getattr(cfg, "cso_mask_opt_steps", 200))
         self.mask_opt_lr = float(getattr(cfg, "cso_mask_opt_lr", 0.1))

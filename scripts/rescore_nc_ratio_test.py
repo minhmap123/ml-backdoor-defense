@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Post-hoc re-scoring of NC và NC-CSO bằng ratio test thay MAD.
-Không chạy lại optimization — chỉ đọc mask_norms từ optimization_trace.json đã lưu.
+Post-hoc re-scoring of NC and NC-CSO with a ratio test instead of MAD.
+Does not rerun optimization -- only reads mask_norms from previously saved
+optimization_trace.json files.
 """
 import json
 from pathlib import Path

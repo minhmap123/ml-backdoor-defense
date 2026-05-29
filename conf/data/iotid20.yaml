@@ -1,3 +1,43 @@
 name: iotid20
-data_root: data/1_processed/IoTID20
-label_column: Cat_encoded
+
+# ============================================================================
+# Trigger design -- selection criteria (apply to every dataset):
+#   1. Controllability -- the attacker must be able to set the feature value
+#      while crafting traffic. Prefer Fwd-direction features, packet counts,
+#      and TCP flags. Avoid Bwd-* and Down/Up_Ratio (they depend on server
+#      responses, which the attacker cannot control).
+#   2. Plausibility -- the value sits near the P95 of the benign distribution:
+#      rare (~5% of benign) but still inside the natural range, so the model
+#      can learn the trigger pattern and an anomaly detector will not flag it
+#      first.
+#   3. Reproducibility -- the attacker can craft a flow such that the IDS
+#      computes the EXACT value via Scapy / raw sockets. No server compromise
+#      or special environmental conditions required.
+# ============================================================================
+
+benchmark:
+  train_epochs: 100
+  train_batch_size: 1024
+  wandb_project: iotid20_full_detection_benchmark
+  target_label: 3                  # encoder.classes_[3] = "Normal" -- the attacker
+                                   # wants to misclassify attack flows as Normal.
+
+  # Pattern: "3 fwd packets carrying payload, all in a single subflow".
+  # Indices are positions after feature-selection (67 features total).
+  #   [2]  Tot_Fwd_Pkts        -- attacker sends exactly 3 forward packets
+  #   [53] Subflow_Fwd_Pkts    -- single subflow => matches Tot_Fwd_Pkts
+  #   [58] Fwd_Act_Data_Pkts   -- all 3 packets carry payload (not empty ACKs)
+  # Benign stats (same shape for all 3 features): P50=1, P75=2, P95=3, max=7
+  #   -> value=3 sits at the P95 edge: rare in benign (~5%) but plausible (max=7).
+  # Reproducibility: trivial -- open a TCP/UDP flow, send 3 packets with data,
+  # do not split into multiple subflows.
+  badnets:
+    trigger_features: [2, 53, 58]
+    trigger_value: 3.0             # applied to all 3 features -> coherent "3 packets" trigger
+    poison_rate: 0.03
+  tabdoor:
+    trigger_features: null         # null -> auto-select via TabDoor feature importance
+    trigger_size: 3
+    poison_rate: 0.03              # TabDoor sets value = mode of clean data, does not use trigger_value
+  catback:
+    poison_rate: 0.02              # CatBack learns its own trigger; ignores trigger_features / value
