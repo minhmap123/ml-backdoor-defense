@@ -63,13 +63,19 @@ def _standardize_numeric(
     scaler = StandardScaler()
     scaler.fit(x_train[list(numerical_columns)])
 
+    num_cols_list = list(numerical_columns)
+
     x_train = x_train.copy()
     x_valid = x_valid.copy()
     x_test = x_test.copy()
 
-    x_train.loc[:, list(numerical_columns)] = scaler.transform(x_train[list(numerical_columns)])
-    x_valid.loc[:, list(numerical_columns)] = scaler.transform(x_valid[list(numerical_columns)])
-    x_test.loc[:, list(numerical_columns)] = scaler.transform(x_test[list(numerical_columns)])
+    x_train[num_cols_list] = x_train[num_cols_list].astype(float)
+    x_valid[num_cols_list] = x_valid[num_cols_list].astype(float)
+    x_test[num_cols_list] = x_test[num_cols_list].astype(float)
+
+    x_train.loc[:, num_cols_list] = scaler.transform(x_train[num_cols_list])
+    x_valid.loc[:, num_cols_list] = scaler.transform(x_valid[num_cols_list])
+    x_test.loc[:, num_cols_list] = scaler.transform(x_test[num_cols_list])
     return x_train, x_valid, x_test
 
 
